@@ -1,0 +1,515 @@
+import { useEffect, useState } from 'react';
+import type { BitwardenStatus, Snippet } from '../../electron/shared';
+import { useSettings } from '../store/settings';
+import { useServers } from '../store/servers';
+import { runExport, runImport } from '../lib/sync';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
+import {
+  KeyRound,
+  Lock,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  Terminal,
+  Trash2,
+  Unlock,
+} from 'lucide-react';
+
+type Section = 'bitwarden' | 'snippets' | 'sync';
+
+interface Props {
+  onDone: () => void;
+}
+
+export function Settings({ onDone }: Props) {
+  const [section, setSection] = useState<Section>('bitwarden');
+  return (
+    <Dialog open onOpenChange={(open) => !open && onDone()}>
+      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>
+            Global configuration shared across all servers.
+          </DialogDescription>
+        </DialogHeader>
+
+        <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="bitwarden">Keychain</TabsTrigger>
+            <TabsTrigger value="snippets">Snippets</TabsTrigger>
+            <TabsTrigger value="sync">Auto-sync</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        <div className="-mr-2 flex-1 overflow-y-auto pr-2">
+          {section === 'bitwarden' && <BitwardenSection />}
+          {section === 'snippets' && <SnippetsSection />}
+          {section === 'sync' && <SyncSection />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Keychain (Bitwarden) ──────────────────────────────────────────────────
+
+function BitwardenSection() {
+  const bw = useSettings((s) => s.settings.bitwarden);
+  const setBitwarden = useSettings((s) => s.setBitwarden);
+  const repersist = useServers((s) => s.repersist);
+  const loadSecretsFromVault = useServers((s) => s.loadSecretsFromVault);
+  const pushAllSecretsToVault = useServers((s) => s.pushAllSecretsToVault);
+
+  const [status, setStatus] = useState<BitwardenStatus | null>(null);
+  const [master, setMaster] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const api = window.servercase;
+
+  const refresh = async () => {
+    if (!api) return;
+    await api.bw.configure(bw);
+    setStatus(await api.bw.status());
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bw.cliPath, bw.serverUrl, bw.itemPrefix]);
+
+  const toggle = async (next: boolean) => {
+    setMsg(null);
+    if (!next) {
+      // Pull any vault secrets back into memory before turning off, then
+      // persist them locally again.
+      try {
+        await loadSecretsFromVault();
+      } catch {
+        /* vault may be locked; nothing to pull */
+      }
+      setBitwarden({ enabled: false });
+      repersist();
+      return;
+    }
+    setBitwarden({ enabled: true });
+    await api?.bw.configure({ ...bw, enabled: true });
+    await refresh();
+  };
+
+  const unlock = async () => {
+    if (!api) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const next = await api.bw.unlock(master);
+      setStatus(next);
+      setMaster('');
+      if (next.state === 'unlocked') {
+        await loadSecretsFromVault();
+        setMsg('Vault unlocked and secrets loaded.');
+      }
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const lock = async () => {
+    await api?.bw.lock();
+    await refresh();
+  };
+
+  const pushAll = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await pushAllSecretsToVault();
+      await api?.bw.sync();
+      repersist();
+      setMsg('All server secrets pushed to the vault.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unlocked = status?.state === 'unlocked';
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <ShieldCheck className="size-4" /> Store credentials in Bitwarden
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Usernames, passwords and SSH keys are kept in your Bitwarden vault
+            via the <code>bw</code> CLI and synced end-to-end across devices.
+            When off, secrets stay on this device only and are never written to
+            the sync file.
+          </p>
+        </div>
+        <Switch checked={bw.enabled} onCheckedChange={toggle} />
+      </div>
+
+      {bw.enabled && (
+        <>
+          <Separator />
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label htmlFor="bw-cli">`bw` CLI path (optional)</Label>
+              <Input
+                id="bw-cli"
+                placeholder="bw (resolved on PATH)"
+                value={bw.cliPath}
+                onChange={(e) => setBitwarden({ cliPath: e.target.value })}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="bw-server">Server URL (self-hosted)</Label>
+                <Input
+                  id="bw-server"
+                  placeholder="https://bitwarden.com"
+                  value={bw.serverUrl}
+                  onChange={(e) => setBitwarden({ serverUrl: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="bw-prefix">Item name prefix</Label>
+                <Input
+                  id="bw-prefix"
+                  value={bw.itemPrefix}
+                  onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Vault status</span>
+              <VaultBadge status={status} />
+            </div>
+
+            {status && !status.available && (
+              <p className="text-sm text-destructive">
+                The <code>bw</code> CLI was not found. Install it and ensure it
+                is on your PATH (or set an explicit path above).
+              </p>
+            )}
+            {status?.available && status.state === 'unauthenticated' && (
+              <p className="text-sm text-muted-foreground">
+                Not logged in. Run <code>bw login</code> in a terminal first
+                (Bitwarden login can require 2FA), then return here to unlock.
+              </p>
+            )}
+            {status?.available && status.state === 'locked' && (
+              <div className="flex items-end gap-2">
+                <div className="grid flex-1 gap-2">
+                  <Label htmlFor="bw-master">Master password</Label>
+                  <Input
+                    id="bw-master"
+                    type="password"
+                    value={master}
+                    onChange={(e) => setMaster(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void unlock()}
+                  />
+                </div>
+                <Button onClick={unlock} disabled={busy || !master}>
+                  <Unlock /> Unlock
+                </Button>
+              </div>
+            )}
+            {unlocked && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={pushAll} disabled={busy}>
+                  <KeyRound /> Push all secrets
+                </Button>
+                <Button variant="outline" onClick={() => void refresh()}>
+                  <RefreshCw /> Refresh
+                </Button>
+                <Button variant="outline" onClick={lock}>
+                  <Lock /> Lock
+                </Button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
+
+function VaultBadge({ status }: { status: BitwardenStatus | null }) {
+  if (!status) return <Badge variant="secondary">checking…</Badge>;
+  if (!status.available) return <Badge variant="destructive">CLI missing</Badge>;
+  if (status.state === 'unlocked')
+    return (
+      <Badge>
+        unlocked{status.userEmail ? ` · ${status.userEmail}` : ''}
+      </Badge>
+    );
+  if (status.state === 'locked') return <Badge variant="secondary">locked</Badge>;
+  return <Badge variant="outline">logged out</Badge>;
+}
+
+// ── Snippets ──────────────────────────────────────────────────────────────
+
+function SnippetsSection() {
+  const snippets = useSettings((s) => s.settings.snippets);
+  const addSnippet = useSettings((s) => s.addSnippet);
+  const updateSnippet = useSettings((s) => s.updateSnippet);
+  const removeSnippet = useSettings((s) => s.removeSnippet);
+
+  const [name, setName] = useState('');
+  const [command, setCommand] = useState('');
+
+  const add = () => {
+    if (!name.trim() || !command.trim()) return;
+    addSnippet({ name: name.trim(), command: command.trim() });
+    setName('');
+    setCommand('');
+  };
+
+  return (
+    <div className="grid gap-4 py-4">
+      <p className="text-sm text-muted-foreground">
+        Reusable commands you can drop into any server's terminal from the
+        snippet menu.
+      </p>
+
+      <div className="grid gap-2 rounded-lg border p-3">
+        <div className="grid gap-2">
+          <Label htmlFor="snip-name">Name</Label>
+          <Input
+            id="snip-name"
+            placeholder="Tail nginx log"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="snip-cmd">Command</Label>
+          <Textarea
+            id="snip-cmd"
+            rows={2}
+            className="font-mono text-xs"
+            placeholder="tail -f /var/log/nginx/access.log"
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+          />
+        </div>
+        <div>
+          <Button onClick={add} disabled={!name.trim() || !command.trim()}>
+            <Plus /> Add snippet
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        {snippets.length === 0 && (
+          <p className="px-1 py-2 text-sm text-muted-foreground">
+            No snippets yet.
+          </p>
+        )}
+        {snippets.map((s) => (
+          <SnippetRow
+            key={s.id}
+            snippet={s}
+            onSave={updateSnippet}
+            onRemove={() => removeSnippet(s.id)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SnippetRow({
+  snippet,
+  onSave,
+  onRemove,
+}: {
+  snippet: Snippet;
+  onSave: (s: Snippet) => void;
+  onRemove: () => void;
+}) {
+  const [name, setName] = useState(snippet.name);
+  const [command, setCommand] = useState(snippet.command);
+  const dirty = name !== snippet.name || command !== snippet.command;
+
+  return (
+    <div className="grid gap-2 rounded-lg border p-3">
+      <div className="flex items-center gap-2">
+        <Terminal className="size-4 shrink-0 text-muted-foreground" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+        <Button
+          size="icon"
+          variant="ghost"
+          className="shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={onRemove}
+          title="Delete"
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+      <Textarea
+        rows={2}
+        className="font-mono text-xs"
+        value={command}
+        onChange={(e) => setCommand(e.target.value)}
+      />
+      {dirty && (
+        <div>
+          <Button
+            size="sm"
+            onClick={() => onSave({ ...snippet, name, command })}
+          >
+            Save changes
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Auto-sync ─────────────────────────────────────────────────────────────
+
+function SyncSection() {
+  const autoSync = useSettings((s) => s.settings.autoSync);
+  const setAutoSync = useSettings((s) => s.setAutoSync);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const api = window.servercase;
+
+  const pick = async () => {
+    const file = await api?.sync.pickFile('save');
+    if (file) setAutoSync({ filePath: file });
+  };
+
+  const syncNow = async () => {
+    if (!autoSync.filePath) {
+      setMsg('Choose a sync file first.');
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await runExport(autoSync.filePath);
+      setMsg('Synced.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async () => {
+    const file = await api?.sync.pickFile('open');
+    if (!file) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await runImport(file);
+      setMsg('Configuration restored from file.');
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <RefreshCw className="size-4" /> Automatic config sync
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Periodically writes your server list and settings to a JSON file.
+            Secrets are never included — they sync through Bitwarden when
+            enabled.
+          </p>
+        </div>
+        <Switch
+          checked={autoSync.enabled}
+          onCheckedChange={(v) => setAutoSync({ enabled: v })}
+        />
+      </div>
+
+      <Separator />
+
+      <div className="grid gap-3">
+        <div className="grid gap-2">
+          <Label>Sync file</Label>
+          <div className="flex gap-2">
+            <Input
+              readOnly
+              placeholder="No file chosen"
+              value={autoSync.filePath}
+              className="font-mono text-xs"
+            />
+            <Button variant="outline" onClick={pick}>
+              Choose…
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid w-40 gap-2">
+          <Label htmlFor="sync-interval">Interval (minutes)</Label>
+          <Input
+            id="sync-interval"
+            inputMode="numeric"
+            value={String(autoSync.intervalMinutes)}
+            onChange={(e) =>
+              setAutoSync({
+                intervalMinutes: Math.max(1, Number(e.target.value) || 1),
+              })
+            }
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={syncNow} disabled={busy}>
+            <RefreshCw /> Sync now
+          </Button>
+          <Button variant="outline" onClick={restore} disabled={busy}>
+            Restore from file…
+          </Button>
+        </div>
+
+        {autoSync.lastSyncedAt && (
+          <p className="text-xs text-muted-foreground">
+            Last synced {new Date(autoSync.lastSyncedAt).toLocaleString()}
+          </p>
+        )}
+      </div>
+
+      {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}

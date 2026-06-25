@@ -1,0 +1,46 @@
+import { useEffect } from 'react';
+import { useSettings } from './store/settings';
+import { useServers } from './store/servers';
+import { runExport } from './lib/sync';
+
+/**
+ * Applies the global settings to the main process: keeps the Bitwarden vault
+ * configured, loads vault secrets into memory once the vault is unlocked, and
+ * drives the periodic config auto-sync.
+ */
+export function useGlobalSettings(): void {
+  const bitwarden = useSettings((s) => s.settings.bitwarden);
+  const autoSync = useSettings((s) => s.settings.autoSync);
+  const loadSecretsFromVault = useServers((s) => s.loadSecretsFromVault);
+
+  // Mirror the current Bitwarden settings into the main-process vault.
+  useEffect(() => {
+    void window.servercase?.bw.configure(bitwarden);
+  }, [bitwarden]);
+
+  // When the vault is enabled and already unlocked, pull secrets into memory.
+  useEffect(() => {
+    const api = window.servercase;
+    if (!api || !bitwarden.enabled) return;
+    let cancelled = false;
+    void (async () => {
+      const status = await api.bw.status();
+      if (!cancelled && status.state === 'unlocked') {
+        await loadSecretsFromVault().catch(() => undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bitwarden.enabled, loadSecretsFromVault]);
+
+  // Periodic auto-sync to the chosen file.
+  useEffect(() => {
+    if (!autoSync.enabled || !autoSync.filePath) return;
+    const ms = Math.max(1, autoSync.intervalMinutes) * 60_000;
+    const timer = setInterval(() => {
+      void runExport(autoSync.filePath).catch(() => undefined);
+    }, ms);
+    return () => clearInterval(timer);
+  }, [autoSync.enabled, autoSync.filePath, autoSync.intervalMinutes]);
+}

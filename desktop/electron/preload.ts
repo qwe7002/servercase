@@ -1,9 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IpcChannels,
+  type BitwardenSettings,
+  type BitwardenStatus,
   type ConnectionEvent,
   type ServerConfig,
+  type ServerSecrets,
   type ServerStatus,
+  type SftpList,
+  type SyncPayload,
 } from './shared.js';
 
 /** The typed API surface exposed to the renderer as `window.servercase`. */
@@ -33,6 +38,60 @@ const api = {
     ipcRenderer.send(IpcChannels.shellResize, serverId, shellId, cols, rows),
   closeShell: (serverId: string, shellId: string): void =>
     ipcRenderer.send(IpcChannels.shellClose, serverId, shellId),
+
+  // Bitwarden secret vault
+  bw: {
+    configure: (settings: BitwardenSettings): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bwConfigure, settings),
+    status: (): Promise<BitwardenStatus> =>
+      ipcRenderer.invoke(IpcChannels.bwStatus),
+    unlock: (masterPassword: string): Promise<BitwardenStatus> =>
+      ipcRenderer.invoke(IpcChannels.bwUnlock, masterPassword),
+    lock: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwLock),
+    sync: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwSync),
+    set: (serverId: string, secrets: ServerSecrets): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bwSet, serverId, secrets),
+    get: (serverId: string): Promise<ServerSecrets | null> =>
+      ipcRenderer.invoke(IpcChannels.bwGet, serverId),
+    list: (): Promise<Record<string, ServerSecrets>> =>
+      ipcRenderer.invoke(IpcChannels.bwList),
+    delete: (serverId: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bwDelete, serverId),
+  },
+
+  // Config sync (JSON file)
+  sync: {
+    pickFile: (mode: 'open' | 'save'): Promise<string | null> =>
+      ipcRenderer.invoke(IpcChannels.syncPickFile, mode),
+    export: (filePath: string, payload: SyncPayload): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.syncExport, filePath, payload),
+    import: (filePath: string): Promise<SyncPayload> =>
+      ipcRenderer.invoke(IpcChannels.syncImport, filePath),
+  },
+
+  // SFTP file management
+  sftp: {
+    list: (serverId: string, dir: string): Promise<SftpList> =>
+      ipcRenderer.invoke(IpcChannels.sftpList, serverId, dir),
+    readText: (serverId: string, file: string): Promise<string> =>
+      ipcRenderer.invoke(IpcChannels.sftpReadText, serverId, file),
+    writeText: (serverId: string, file: string, content: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.sftpWriteText, serverId, file, content),
+    mkdir: (serverId: string, dir: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.sftpMkdir, serverId, dir),
+    rename: (serverId: string, from: string, to: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.sftpRename, serverId, from, to),
+    remove: (serverId: string, target: string, isDir: boolean): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.sftpRemove, serverId, target, isDir),
+    download: (
+      serverId: string,
+      remote: string,
+      suggestedName: string,
+    ): Promise<boolean> =>
+      ipcRenderer.invoke(IpcChannels.sftpDownload, serverId, remote, suggestedName),
+    upload: (serverId: string, remoteDir: string): Promise<boolean> =>
+      ipcRenderer.invoke(IpcChannels.sftpUpload, serverId, remoteDir),
+  },
 
   onConnectionEvent: (cb: (e: ConnectionEvent) => void): (() => void) => {
     const handler = (_e: unknown, payload: ConnectionEvent) => cb(payload);

@@ -9,6 +9,8 @@ import {
 } from '../format';
 import { Gauge, UsageBar } from './StatusCard';
 import { Terminal } from './Terminal';
+import { Sftp } from './Sftp';
+import { useSettings } from '../store/settings';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,13 +26,14 @@ interface Props {
   server: ServerConfig;
 }
 
-type Tab = 'overview' | 'terminal';
+type Tab = 'overview' | 'terminal' | 'files';
 
 export function Dashboard({ server }: Props) {
   const connState = useServers((s) => s.connState[server.id]) ?? 'disconnected';
   const status = useServers((s) => s.status[server.id]);
   const lastError = useServers((s) => s.lastError[server.id]);
   const setConnState = useServers((s) => s.setConnState);
+  const vaultEnabled = useSettings((s) => s.settings.bitwarden.enabled);
   const [tab, setTab] = useState<Tab>('overview');
   const [busy, setBusy] = useState(false);
 
@@ -40,7 +43,14 @@ export function Dashboard({ server }: Props) {
     setBusy(true);
     setConnState(server.id, 'connecting');
     try {
-      await api.connect(server);
+      // With the Bitwarden vault, secrets live there rather than on the
+      // server object; fetch them on demand if they are missing.
+      let cfg = server;
+      if (vaultEnabled && !server.password && !server.privateKey) {
+        const secrets = await api.bw.get(server.id);
+        if (secrets) cfg = { ...server, ...secrets };
+      }
+      await api.connect(cfg);
     } catch (e) {
       setConnState(server.id, 'error', (e as Error).message);
     } finally {
@@ -74,6 +84,7 @@ export function Dashboard({ server }: Props) {
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="terminal">Terminal</TabsTrigger>
+              <TabsTrigger value="files">Files</TabsTrigger>
             </TabsList>
           </Tabs>
           {connected ? (
@@ -101,6 +112,12 @@ export function Dashboard({ server }: Props) {
           <Terminal serverId={server.id} />
         ) : (
           <Placeholder>Connect to open a terminal.</Placeholder>
+        )
+      ) : tab === 'files' ? (
+        connected ? (
+          <Sftp serverId={server.id} />
+        ) : (
+          <Placeholder>Connect to browse files over SFTP.</Placeholder>
         )
       ) : !connected ? (
         <Placeholder>

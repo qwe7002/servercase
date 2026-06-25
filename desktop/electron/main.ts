@@ -1,7 +1,15 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { SshManager } from './ssh/sshManager.js';
-import { IpcChannels, type ServerConfig } from './shared.js';
+import { BitwardenVault } from './bitwarden.js';
+import {
+  IpcChannels,
+  type BitwardenSettings,
+  type ServerConfig,
+  type ServerSecrets,
+  type SyncPayload,
+} from './shared.js';
 
 let win: BrowserWindow | null = null;
 
@@ -16,6 +24,8 @@ const ssh = new SshManager(
     send(IpcChannels.shellOutput, serverId, shellId, data),
   (serverId, shellId) => send(IpcChannels.shellClosed, serverId, shellId),
 );
+
+const bitwarden = new BitwardenVault();
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -71,6 +81,115 @@ function registerIpc(): void {
   );
   ipcMain.on(IpcChannels.shellClose, (_e, serverId: string, shellId: string) =>
     ssh.closeShell(serverId, shellId),
+  );
+
+  // ── Bitwarden secret vault ────────────────────────────────────────────────
+  ipcMain.handle(IpcChannels.bwConfigure, (_e, settings: BitwardenSettings) => {
+    bitwarden.configure(settings);
+  });
+  ipcMain.handle(IpcChannels.bwStatus, () => bitwarden.status());
+  ipcMain.handle(IpcChannels.bwUnlock, (_e, masterPassword: string) =>
+    bitwarden.unlock(masterPassword),
+  );
+  ipcMain.handle(IpcChannels.bwLock, () => bitwarden.lock());
+  ipcMain.handle(IpcChannels.bwSync, () => bitwarden.sync());
+  ipcMain.handle(
+    IpcChannels.bwSet,
+    (_e, serverId: string, secrets: ServerSecrets) =>
+      bitwarden.setSecrets(serverId, secrets),
+  );
+  ipcMain.handle(IpcChannels.bwGet, (_e, serverId: string) =>
+    bitwarden.getSecrets(serverId),
+  );
+  ipcMain.handle(IpcChannels.bwList, () => bitwarden.listSecrets());
+  ipcMain.handle(IpcChannels.bwDelete, (_e, serverId: string) =>
+    bitwarden.deleteSecrets(serverId),
+  );
+
+  // ── Config sync (JSON file, never contains secrets) ───────────────────────
+  ipcMain.handle(IpcChannels.syncPickFile, async (_e, mode: 'open' | 'save') => {
+    if (!win) return null;
+    if (mode === 'save') {
+      const r = await dialog.showSaveDialog(win, {
+        title: 'Choose sync file',
+        defaultPath: 'servercase-sync.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      return r.canceled ? null : (r.filePath ?? null);
+    }
+    const r = await dialog.showOpenDialog(win, {
+      title: 'Choose sync file',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  ipcMain.handle(
+    IpcChannels.syncExport,
+    async (_e, filePath: string, payload: SyncPayload) => {
+      await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
+    },
+  );
+  ipcMain.handle(
+    IpcChannels.syncImport,
+    async (_e, filePath: string): Promise<SyncPayload> => {
+      const raw = await fs.readFile(filePath, 'utf8');
+      return JSON.parse(raw) as SyncPayload;
+    },
+  );
+
+  // ── SFTP ──────────────────────────────────────────────────────────────────
+  ipcMain.handle(IpcChannels.sftpList, (_e, serverId: string, dir: string) =>
+    ssh.sftpList(serverId, dir),
+  );
+  ipcMain.handle(IpcChannels.sftpReadText, (_e, serverId: string, file: string) =>
+    ssh.sftpReadText(serverId, file),
+  );
+  ipcMain.handle(
+    IpcChannels.sftpWriteText,
+    (_e, serverId: string, file: string, content: string) =>
+      ssh.sftpWriteText(serverId, file, content),
+  );
+  ipcMain.handle(IpcChannels.sftpMkdir, (_e, serverId: string, dir: string) =>
+    ssh.sftpMkdir(serverId, dir),
+  );
+  ipcMain.handle(
+    IpcChannels.sftpRename,
+    (_e, serverId: string, from: string, to: string) =>
+      ssh.sftpRename(serverId, from, to),
+  );
+  ipcMain.handle(
+    IpcChannels.sftpRemove,
+    (_e, serverId: string, target: string, isDir: boolean) =>
+      ssh.sftpRemove(serverId, target, isDir),
+  );
+  ipcMain.handle(
+    IpcChannels.sftpDownload,
+    async (_e, serverId: string, remote: string, suggestedName: string) => {
+      if (!win) return false;
+      const r = await dialog.showSaveDialog(win, {
+        title: 'Download file',
+        defaultPath: suggestedName,
+      });
+      if (r.canceled || !r.filePath) return false;
+      await ssh.sftpFastGet(serverId, remote, r.filePath);
+      return true;
+    },
+  );
+  ipcMain.handle(
+    IpcChannels.sftpUpload,
+    async (_e, serverId: string, remoteDir: string) => {
+      if (!win) return false;
+      const r = await dialog.showOpenDialog(win, {
+        title: 'Upload file',
+        properties: ['openFile', 'multiSelections'],
+      });
+      if (r.canceled || r.filePaths.length === 0) return false;
+      for (const local of r.filePaths) {
+        await ssh.sftpFastPut(serverId, local, remoteDir, path.basename(local));
+      }
+      return true;
+    },
   );
 }
 

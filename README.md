@@ -47,8 +47,11 @@ See each subdirectory's `README.md` for build instructions.
 
 ## Status
 
-These are working v1 foundations. Known follow-ups: private-key auth on iOS,
-full PTY terminals on mobile, host-key pinning, and SFTP / Docker / systemd
+These are working v1 foundations. The desktop client additionally ships global
+settings (a Bitwarden-backed keychain for credentials, reusable command
+snippets, and config auto-sync) and a FileZilla-style SFTP file manager. Known
+follow-ups: bringing those panels to the mobile clients, private-key auth on
+iOS, full PTY terminals on mobile, host-key pinning, and Docker / systemd
 management panels.
 
 ## License
