@@ -13,7 +13,8 @@ export function Terminal({ serverId }: Props) {
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
+    const api = window.servercase;
+    if (!host || !api) return;
 
     const shellId = `sh-${Math.random().toString(36).slice(2, 8)}`;
     const term = new XTerm({
@@ -29,18 +30,18 @@ export function Terminal({ serverId }: Props) {
 
     let disposed = false;
 
-    const offOutput = window.servercase.onShellOutput((sid, shid, data) => {
+    const offOutput = api.onShellOutput((sid, shid, data) => {
       if (sid === serverId && shid === shellId) term.write(data);
     });
-    const offClosed = window.servercase.onShellClosed((sid, shid) => {
+    const offClosed = api.onShellClosed((sid, shid) => {
       if (sid === serverId && shid === shellId && !disposed) {
         term.writeln('\r\n\x1b[33m[session closed]\x1b[0m');
       }
     });
 
-    term.onData((d) => window.servercase.sendShellData(serverId, shellId, d));
+    term.onData((d) => api.sendShellData(serverId, shellId, d));
 
-    void window.servercase.openShell(
+    void api.openShell(
       serverId,
       shellId,
       term.cols,
@@ -49,7 +50,7 @@ export function Terminal({ serverId }: Props) {
 
     const onResize = () => {
       fit.fit();
-      window.servercase.resizeShell(serverId, shellId, term.cols, term.rows);
+      api.resizeShell(serverId, shellId, term.cols, term.rows);
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(host);
@@ -59,10 +60,15 @@ export function Terminal({ serverId }: Props) {
       ro.disconnect();
       offOutput();
       offClosed();
-      window.servercase.closeShell(serverId, shellId);
+      api.closeShell(serverId, shellId);
       term.dispose();
     };
   }, [serverId]);
 
-  return <div className="terminal" ref={hostRef} />;
+  return (
+    <div
+      className="terminal m-3 flex-1 overflow-hidden rounded-lg border bg-[#0b0d12]"
+      ref={hostRef}
+    />
+  );
 }

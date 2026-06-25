@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import type { AuthType, ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 
 interface Props {
   /** When editing, the existing server; otherwise undefined for a new one. */
@@ -44,100 +57,121 @@ export function ServerForm({ existing, onDone }: Props) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onDone}>
+    <Dialog open onOpenChange={(open) => !open && onDone()}>
       <form
-        className="modal card"
-        onClick={(e) => e.stopPropagation()}
+        id="server-form"
         onSubmit={submit}
       >
-        <h2>{existing ? 'Edit server' : 'Add server'}</h2>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{existing ? 'Edit server' : 'Add server'}</DialogTitle>
+            <DialogDescription>
+              Configure the SSH connection used to monitor this server.
+            </DialogDescription>
+          </DialogHeader>
 
-        <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        </label>
-
-        <div className="row">
-          <label style={{ flex: 3 }}>
-            Host
-            <input
-              value={host}
-              placeholder="example.com or 10.0.0.5"
-              onChange={(e) => setHost(e.target.value)}
-            />
-          </label>
-          <label style={{ flex: 1 }}>
-            Port
-            <input
-              value={port}
-              inputMode="numeric"
-              onChange={(e) => setPort(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <label>
-          Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} />
-        </label>
-
-        <div className="seg">
-          <button
-            type="button"
-            className={authType === 'password' ? 'active' : ''}
-            onClick={() => setAuthType('password')}
-          >
-            Password
-          </button>
-          <button
-            type="button"
-            className={authType === 'key' ? 'active' : ''}
-            onClick={() => setAuthType('key')}
-          >
-            Private key
-          </button>
-        </div>
-
-        {authType === 'password' ? (
-          <label>
-            Password
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-        ) : (
-          <>
-            <label>
-              Private key (PEM)
-              <textarea
-                rows={5}
-                value={privateKey}
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                onChange={(e) => setPrivateKey(e.target.value)}
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="server-name">Name</Label>
+              <Input
+                id="server-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
               />
-            </label>
-            <label>
-              Passphrase (optional)
-              <input
-                type="password"
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-              />
-            </label>
-          </>
-        )}
+            </div>
 
-        <div className="row end">
-          <button type="button" className="ghost" onClick={onDone}>
-            Cancel
-          </button>
-          <button type="submit" className="primary" disabled={!canSave}>
-            Save
-          </button>
-        </div>
+            <div className="grid grid-cols-[1fr_7rem] gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="server-host">Host</Label>
+                <Input
+                  id="server-host"
+                  value={host}
+                  placeholder="example.com or 10.0.0.5"
+                  onChange={(e) => setHost(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="server-port">Port</Label>
+                <Input
+                  id="server-port"
+                  value={port}
+                  inputMode="numeric"
+                  onChange={(e) => setPort(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="server-username">Username</Label>
+              <Input
+                id="server-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Authentication</Label>
+              <Tabs
+                value={authType}
+                onValueChange={(value) => setAuthType(value as AuthType)}
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="password">Password</TabsTrigger>
+                  <TabsTrigger value="key">Private key</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            {authType === 'password' ? (
+              <div className="grid gap-2">
+                <Label htmlFor="server-password">Password</Label>
+                <Input
+                  id="server-password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="server-key">Private key (PEM)</Label>
+                  <Textarea
+                    id="server-key"
+                    rows={6}
+                    className="font-mono text-xs"
+                    value={privateKey}
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    onChange={(e) => setPrivateKey(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="server-passphrase">
+                    Passphrase (optional)
+                  </Label>
+                  <Input
+                    id="server-passphrase"
+                    type="password"
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onDone}>
+              Cancel
+            </Button>
+            <Button type="submit" form="server-form" disabled={!canSave}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </form>
-    </div>
+    </Dialog>
   );
 }

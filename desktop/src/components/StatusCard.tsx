@@ -18,7 +18,8 @@ export function Gauge({ label, value, caption }: GaugeProps) {
   const c = 2 * Math.PI * r;
   const dash = (pct / 100) * c;
   return (
-    <div className="card gauge">
+    <Card className="w-40">
+      <CardContent className="flex flex-col items-center p-4">
       <svg viewBox="0 0 100 100" width="110" height="110">
         <circle cx="50" cy="50" r={r} className="gauge-track" />
         <circle
@@ -37,8 +38,13 @@ export function Gauge({ label, value, caption }: GaugeProps) {
           {label}
         </text>
       </svg>
-      {caption && <span className="gauge-caption">{caption}</span>}
-    </div>
+      {caption && (
+        <span className="mt-1 text-center text-xs text-muted-foreground">
+          {caption}
+        </span>
+      )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -54,19 +60,20 @@ interface BarProps {
 /** A horizontal usage bar used for memory, swap and disks. */
 export function UsageBar({ label, used, total, format, pct }: BarProps) {
   return (
-    <div className="usage-bar">
-      <div className="usage-bar-head">
-        <span>{label}</span>
-        <span className="muted">
+    <div className="space-y-2">
+      <div className="flex justify-between gap-4 text-sm">
+        <span className="truncate">{label}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">
           {format(used)} / {format(total)} · {Math.round(pct)}%
         </span>
       </div>
-      <div className="track">
-        <div
-          className="fill"
-          style={{ width: `${pct}%`, background: colorFor(pct) }}
-        />
-      </div>
+      <Progress
+        value={pct}
+        className="[&>div]:bg-[var(--usage-color)]"
+        style={{ '--usage-color': colorFor(pct) } as React.CSSProperties}
+      />
     </div>
   );
 }
+import { Card, CardContent } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';

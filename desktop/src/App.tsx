@@ -25,13 +25,13 @@ export function App() {
   };
 
   return (
-    <div className="app">
+    <div className="flex h-screen overflow-hidden bg-background">
       <ServerList onAdd={openAdd} onEdit={openEdit} />
       {selected ? (
         <Dashboard key={selected.id} server={selected} />
       ) : (
-        <main className="dashboard empty-main">
-          <div className="placeholder">
+        <main className="flex flex-1 items-center justify-center">
+          <div className="max-w-sm text-center text-sm text-muted-foreground">
             Select a server, or add one to get started.
           </div>
         </main>

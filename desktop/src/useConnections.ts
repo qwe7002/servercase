@@ -13,6 +13,7 @@ export function useConnections(): void {
 
   // Subscribe once to connection-state pushes.
   useEffect(() => {
+    if (!window.servercase) return;
     return window.servercase.onConnectionEvent((e) => {
       setConnState(e.serverId, e.state, e.error);
     });
@@ -20,12 +21,19 @@ export function useConnections(): void {
 
   // Poll status for the selected, connected server.
   useEffect(() => {
-    if (!selectedId || connState[selectedId] !== 'connected') return;
+    const api = window.servercase;
+    if (
+      !api ||
+      !selectedId ||
+      connState[selectedId] !== 'connected'
+    ) {
+      return;
+    }
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const status = await window.servercase.fetchStatus(selectedId);
+        const status = await api.fetchStatus(selectedId);
         if (!cancelled) setStatus(selectedId, status);
       } catch {
         // Transient errors are surfaced via connection events; ignore here.

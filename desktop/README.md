@@ -1,7 +1,7 @@
 # ServerCase — Desktop (Electron + React)
 
-A desktop client for managing Linux servers over SSH. Built with
-Electron, React, TypeScript and Vite.
+A desktop client for managing Linux servers over SSH. Built with Electron,
+React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
 
 ## Features
 
@@ -21,6 +21,7 @@ electron/                Main process (Node) — owns all SSH sockets
   ssh/sshManager.ts      ssh2 connections: exec (status) + shell (terminal)
   ssh/statusCollector.ts /proc parsing + CPU/net delta computation
 src/                     React renderer
+  components/ui/         shadcn/ui primitives
   store/servers.ts       zustand store (persisted server list)
   useConnections.ts      connection events + 3s status polling
   components/            ServerList, ServerForm, Dashboard, StatusCard, Terminal

@@ -1,10 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SshManager } from './ssh/sshManager.js';
 import { IpcChannels, type ServerConfig } from './shared.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let win: BrowserWindow | null = null;
 
@@ -29,12 +26,9 @@ function createWindow(): void {
     title: 'ServerCase',
     backgroundColor: '#0f1115',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // ESM preload (package "type":"module") requires the sandbox off; the
-      // renderer stays isolated and without direct Node access.
-      sandbox: false,
     },
   });
 
@@ -42,7 +36,7 @@ function createWindow(): void {
   if (devUrl) {
     win.loadURL(devUrl);
   } else {
-    win.loadFile(path.join(__dirname, '../dist/index.html'));
+    win.loadFile(path.join(app.getAppPath(), 'dist/index.html'));
   }
 
   win.on('closed', () => {
