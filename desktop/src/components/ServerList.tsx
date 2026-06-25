@@ -2,11 +2,12 @@ import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { Pencil, Plus, Server, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Server, Settings as SettingsIcon, Trash2 } from 'lucide-react';
 
 interface Props {
   onAdd: () => void;
   onEdit: (cfg: ServerConfig) => void;
+  onOpenSettings: () => void;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -16,7 +17,7 @@ const STATE_LABEL: Record<string, string> = {
   disconnected: 'Offline',
 };
 
-export function ServerList({ onAdd, onEdit }: Props) {
+export function ServerList({ onAdd, onEdit, onOpenSettings }: Props) {
   const servers = useServers((s) => s.servers);
   const selectedId = useServers((s) => s.selectedId);
   const connState = useServers((s) => s.connState);
@@ -32,9 +33,19 @@ export function ServerList({ onAdd, onEdit }: Props) {
           </span>
           ServerCase
         </div>
-        <Button size="icon" variant="outline" title="Add server" onClick={onAdd}>
-          <Plus />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="icon"
+            variant="ghost"
+            title="Settings"
+            onClick={onOpenSettings}
+          >
+            <SettingsIcon />
+          </Button>
+          <Button size="icon" variant="outline" title="Add server" onClick={onAdd}>
+            <Plus />
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 space-y-1 overflow-y-auto p-2">

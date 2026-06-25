@@ -2,18 +2,22 @@ import { useState } from 'react';
 import type { ServerConfig } from '../electron/shared';
 import { useServers } from './store/servers';
 import { useConnections } from './useConnections';
+import { useGlobalSettings } from './useGlobalSettings';
 import { ServerList } from './components/ServerList';
 import { ServerForm } from './components/ServerForm';
 import { Dashboard } from './components/Dashboard';
+import { Settings } from './components/Settings';
 
 export function App() {
   useConnections();
+  useGlobalSettings();
   const servers = useServers((s) => s.servers);
   const selectedId = useServers((s) => s.selectedId);
   const selected = servers.find((s) => s.id === selectedId);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ServerConfig | undefined>();
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const openAdd = () => {
     setEditing(undefined);
@@ -26,7 +30,11 @@ export function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <ServerList onAdd={openAdd} onEdit={openEdit} />
+      <ServerList
+        onAdd={openAdd}
+        onEdit={openEdit}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
       {selected ? (
         <Dashboard key={selected.id} server={selected} />
       ) : (
@@ -39,6 +47,7 @@ export function App() {
       {formOpen && (
         <ServerForm existing={editing} onDone={() => setFormOpen(false)} />
       )}
+      {settingsOpen && <Settings onDone={() => setSettingsOpen(false)} />}
     </div>
   );
 }
