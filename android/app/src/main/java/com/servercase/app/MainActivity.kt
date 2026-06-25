@@ -1,0 +1,77 @@
+package com.servercase.app
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.servercase.app.data.ConnectionState
+import com.servercase.app.ui.DashboardScreen
+import com.servercase.app.ui.ServerFormScreen
+import com.servercase.app.ui.ServerListScreen
+import com.servercase.app.ui.TerminalScreen
+import com.servercase.app.ui.theme.ServerCaseTheme
+import com.servercase.app.vm.ServersViewModel
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            ServerCaseTheme {
+                val vm: ServersViewModel = viewModel()
+                val state by vm.ui.collectAsState()
+                val nav = rememberNavController()
+
+                NavHost(navController = nav, startDestination = "list") {
+                    composable("list") {
+                        ServerListScreen(
+                            state = state,
+                            onAdd = { nav.navigate("form") },
+                            onOpen = { nav.navigate("dashboard/${it.id}") },
+                            onEdit = { nav.navigate("form?id=${it.id}") },
+                            onDelete = { vm.delete(it.id) },
+                        )
+                    }
+                    composable(
+                        route = "form?id={id}",
+                        arguments = listOf(navArgument("id") { nullable = true; defaultValue = null }),
+                    ) { entry ->
+                        val id = entry.arguments?.getString("id")
+                        ServerFormScreen(
+                            existing = id?.let { arg -> state.servers.find { it.id == arg } },
+                            onSave = { vm.upsert(it); nav.popBackStack() },
+                            onBack = { nav.popBackStack() },
+                        )
+                    }
+                    composable("dashboard/{id}") { entry ->
+                        val id = entry.arguments?.getString("id") ?: return@composable
+                        val server = state.servers.find { it.id == id } ?: return@composable
+                        DashboardScreen(
+                            server = server,
+                            state = state.connState[id] ?: ConnectionState.DISCONNECTED,
+                            status = state.status[id],
+                            error = state.errors[id],
+                            onConnect = { vm.connect(server) },
+                            onDisconnect = { vm.disconnect(id) },
+                            onOpenTerminal = { nav.navigate("terminal/$id") },
+                            onStartPolling = { vm.startPolling(id) },
+                            onStopPolling = { vm.stopPolling() },
+                            onBack = { nav.popBackStack() },
+                        )
+                    }
+                    composable("terminal/{id}") { entry ->
+                        val id = entry.arguments?.getString("id") ?: return@composable
+                        TerminalScreen(client = vm.client(id), onBack = { nav.popBackStack() })
+                    }
+                }
+            }
+        }
+    }
+}
