@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "ServerCase desktop client (Electron + React) — manage Linux servers over SSH",
   "author": "ServerCase",
-  "license": "Apache-2.0",
+  "license": "BSD-3-Clause",
   "private": true,
   "main": "dist-electron/main.js",
   "type": "module",

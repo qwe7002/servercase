@@ -50,3 +50,7 @@ See each subdirectory's `README.md` for build instructions.
 These are working v1 foundations. Known follow-ups: private-key auth on iOS,
 full PTY terminals on mobile, host-key pinning, and SFTP / Docker / systemd
 management panels.
+
+## License
+
+Original work, released under the [BSD 3-Clause License](LICENSE).
