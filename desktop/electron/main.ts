@@ -40,6 +40,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     title: 'ServerCase',
+    icon: path.join(app.getAppPath(), 'assets/icon.png'),
     backgroundColor: '#0f1115',
     webPreferences: {
       preload: path.join(app.getAppPath(), 'dist-electron/preload.js'),
