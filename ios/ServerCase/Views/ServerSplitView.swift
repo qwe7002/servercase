@@ -11,6 +11,9 @@ struct ServerSplitView: View {
     @State private var searchText = ""
     @State private var selection: ServerConfig.ID?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    /// Suppresses the auto-connect for the one programmatic selection we make to
+    /// populate the detail pane on launch; user taps still connect.
+    @State private var pendingAutoSelect = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -49,8 +52,28 @@ struct ServerSplitView: View {
             SettingsView()
         }
         .onChange(of: selection) { _, _ in
+            if pendingAutoSelect {
+                pendingAutoSelect = false
+                return
+            }
             if let server = selectedServer { model.connectIfNeeded(server) }
         }
+        .onAppear { selectFirstIfNeeded() }
+        .onChange(of: model.servers) { _, _ in
+            // Drop a selection whose server was deleted, then re-fill the pane.
+            if let id = selection, !model.servers.contains(where: { $0.id == id }) {
+                selection = nil
+            }
+            selectFirstIfNeeded()
+        }
+    }
+
+    /// Populates the detail pane with the first server when nothing is selected,
+    /// so the iPad layout never shows an empty centered placeholder.
+    private func selectFirstIfNeeded() {
+        guard selection == nil, let first = filtered.first else { return }
+        pendingAutoSelect = true
+        selection = first.id
     }
 
     @ViewBuilder
