@@ -4,11 +4,31 @@ import com.servercase.app.data.BitwardenSettings
 import com.servercase.app.data.ServerSecrets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
+import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.Mac
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
 enum class BitwardenLockState { UNAUTHENTICATED, LOCKED, UNLOCKED }
 
@@ -21,189 +41,318 @@ data class BitwardenStatus(
 )
 
 /**
- * Talks to a running Bitwarden CLI REST bridge (`bw serve`). The bridge holds
- * the unlocked session server-side, so once unlocked we just issue plain HTTP
- * calls. Each server maps to one vault item named `${prefix}${serverId}`; the
- * full [ServerSecrets] bundle lives in the item's notes, with username and
- * password mirrored into the login fields for use from the Bitwarden apps.
+ * A clean-room Bitwarden client: it speaks the Bitwarden REST API directly and
+ * reimplements the account crypto, so it needs neither the `bw` CLI nor the
+ * official SDK.
+ *
+ * Auth uses a personal API key (OAuth `client_credentials`); the master
+ * password is required only to derive the vault key locally and is never sent
+ * to the server or persisted. Only the PBKDF2 KDF is supported.
+ *
+ * Crypto: master key = PBKDF2-SHA256(masterPassword, email, iters, 32); stretch
+ * via HKDF-Expand into enc/mac keys; decrypt the protected key into the 64-byte
+ * user key; EncStrings are "2.iv|ct|mac" = AES-256-CBC + HMAC-SHA256, base64.
  */
 class BitwardenVault {
 
-    @Volatile private var base: String? = null
-    @Volatile private var prefix: String = "ServerCase/"
+    @Volatile private var settings = BitwardenSettings()
+    @Volatile private var accessToken: String? = null
+    @Volatile private var tokenExpiresAt = 0L
+    @Volatile private var userEncKey: ByteArray? = null
+    @Volatile private var userMacKey: ByteArray? = null
+    private val deviceId = UUID.randomUUID().toString()
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    fun configure(settings: BitwardenSettings) {
-        base = settings.serverUrl.trim().ifEmpty { null }?.trimEnd('/')
-        prefix = settings.itemPrefix
+    fun configure(s: BitwardenSettings) {
+        if (s.serverUrl != settings.serverUrl || s.email != settings.email || s.clientId != settings.clientId) {
+            lock()
+        }
+        settings = s
     }
 
-    private fun itemName(serverId: String) = prefix + serverId
+    private val base get() = settings.serverUrl.trim().trimEnd('/')
+    private val identityUrl get() = if (base.isEmpty()) "https://identity.bitwarden.com" else "$base/identity"
+    private val apiUrl get() = if (base.isEmpty()) "https://api.bitwarden.com" else "$base/api"
 
-    suspend fun status(): BitwardenStatus = withContext(Dispatchers.IO) {
-        if (base == null) {
-            return@withContext BitwardenStatus(false, BitwardenLockState.UNAUTHENTICATED,
-                error = "No bw serve URL configured")
+    private val configured
+        get() = settings.email.isNotEmpty() && settings.clientId.isNotEmpty() && settings.clientSecret.isNotEmpty()
+    private val unlocked
+        get() = userEncKey != null && accessToken != null && System.currentTimeMillis() < tokenExpiresAt
+
+    fun status(): BitwardenStatus {
+        val state = when {
+            !configured -> BitwardenLockState.UNAUTHENTICATED
+            unlocked -> BitwardenLockState.UNLOCKED
+            else -> BitwardenLockState.LOCKED
         }
-        runCatching {
-            val env = json.decodeFromString<BwStatusEnvelope>(request("GET", "/status", null))
-            val t = env.data?.template ?: error(env.message ?: "bw status failed")
-            val state = when (t.status) {
-                "unlocked" -> BitwardenLockState.UNLOCKED
-                "locked" -> BitwardenLockState.LOCKED
-                else -> BitwardenLockState.UNAUTHENTICATED
-            }
-            BitwardenStatus(true, state, t.serverUrl, t.userEmail)
-        }.getOrElse {
-            BitwardenStatus(false, BitwardenLockState.UNAUTHENTICATED, error = it.message)
-        }
+        return BitwardenStatus(
+            available = configured,
+            state = state,
+            serverUrl = settings.serverUrl.ifEmpty { "https://bitwarden.com" },
+            userEmail = settings.email.ifEmpty { null },
+        )
     }
 
-    suspend fun unlock(masterPassword: String): BitwardenStatus {
-        withContext(Dispatchers.IO) {
-            call("POST", "/unlock", json.encodeToString(BwUnlockBody(masterPassword)))
-            runCatching { call("POST", "/sync", null) }
-        }
-        return status()
+    suspend fun unlock(masterPassword: String): BitwardenStatus = withContext(Dispatchers.IO) {
+        require(configured) { "Bitwarden API key is not configured" }
+        val kdf = prelogin()
+        val token = requestToken()
+
+        val masterKey = deriveMasterKey(masterPassword, kdf)
+        val stretchedEnc = hkdfExpand(masterKey, "enc", 32)
+        val stretchedMac = hkdfExpand(masterKey, "mac", 32)
+        val userKey = decryptEncString(token.key, stretchedEnc, stretchedMac)
+        require(userKey.size >= 64) { "unexpected vault key length" }
+
+        userEncKey = userKey.copyOfRange(0, 32)
+        userMacKey = userKey.copyOfRange(32, 64)
+        accessToken = token.accessToken
+        tokenExpiresAt = System.currentTimeMillis() + (token.expiresInSec * 1000L) - 30_000L
+        status()
     }
 
-    suspend fun lock() = withContext(Dispatchers.IO) { call("POST", "/lock", null) }
+    fun lock() {
+        accessToken = null
+        tokenExpiresAt = 0L
+        userEncKey = null
+        userMacKey = null
+    }
 
-    suspend fun sync() = withContext(Dispatchers.IO) { call("POST", "/sync", null) }
+    suspend fun sync() { check(unlocked) { "Bitwarden vault is locked" } }
 
     suspend fun getSecrets(serverId: String): ServerSecrets? = withContext(Dispatchers.IO) {
-        findItem(serverId)?.let { decodeSecrets(it) }
+        findCipher(serverId)?.let { decodeSecrets(it) }
     }
 
     suspend fun listSecrets(): Map<String, ServerSecrets> = withContext(Dispatchers.IO) {
-        val env = json.decodeFromString<BwListEnvelope>(
-            request("GET", "/list/object/items?search=" + encode(prefix), null)
-        )
         val out = HashMap<String, ServerSecrets>()
-        env.data?.data.orEmpty()
-            .filter { it.name.startsWith(prefix) }
-            .forEach { out[it.name.removePrefix(prefix)] = decodeSecrets(it) }
+        for (cipher in fetchCiphers()) {
+            val name = decryptField(cipher.name)
+            if (name != null && name.startsWith(settings.itemPrefix)) {
+                out[name.removePrefix(settings.itemPrefix)] = decodeSecrets(cipher)
+            }
+        }
         out
     }
 
     suspend fun setSecrets(serverId: String, secrets: ServerSecrets) = withContext(Dispatchers.IO) {
+        check(unlocked) { "Bitwarden vault is locked" }
         val notes = json.encodeToString(secrets)
-        val body = json.encodeToString(
-            BwItemBody(
-                name = itemName(serverId),
-                notes = notes,
-                login = BwLoginBody(secrets.username, secrets.password),
-            )
-        )
-        val existing = findItem(serverId)
-        if (existing != null) call("PUT", "/object/item/${existing.id}", body)
-        else call("POST", "/object/item", body)
-    }
-
-    suspend fun deleteSecrets(serverId: String) = withContext(Dispatchers.IO) {
-        findItem(serverId)?.let { call("DELETE", "/object/item/${it.id}", null) }
+        val body = buildJsonObject {
+            put("type", 1)
+            put("name", encryptField(settings.itemPrefix + serverId))
+            put("notes", encryptField(notes))
+            put("favorite", false)
+            put("login", buildJsonObject {
+                put("username", secrets.username?.let { encryptField(it) })
+                put("password", secrets.password?.let { encryptField(it) })
+            })
+        }
+        val existing = findCipher(serverId)
+        if (existing != null) api("PUT", "/ciphers/${existing.id}", body.toString())
+        else api("POST", "/ciphers", body.toString())
         Unit
     }
 
-    // --- plumbing ---------------------------------------------------------
+    suspend fun deleteSecrets(serverId: String) = withContext(Dispatchers.IO) {
+        findCipher(serverId)?.let { api("DELETE", "/ciphers/${it.id}", null) }
+        Unit
+    }
 
-    private fun decodeSecrets(item: BwItem): ServerSecrets {
-        item.notes?.let { notes ->
+    // --- crypto -----------------------------------------------------------
+
+    private fun deriveMasterKey(password: String, kdf: KdfInfo): ByteArray {
+        require(kdf.type == 0) { "Only the PBKDF2 KDF is supported; switch your account KDF to PBKDF2." }
+        val salt = settings.email.trim().lowercase()
+        val spec = PBEKeySpec(password.toCharArray(), salt.toByteArray(Charsets.UTF_8), kdf.iterations, 256)
+        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    }
+
+    private fun encryptField(plaintext: String): String =
+        encryptEncString(plaintext.toByteArray(Charsets.UTF_8), encKey(), macKey())
+
+    private fun decryptField(enc: String?): String? {
+        if (enc == null) return null
+        return runCatching { String(decryptEncString(enc, encKey(), macKey()), Charsets.UTF_8) }.getOrNull()
+    }
+
+    private fun decodeSecrets(cipher: Cipher2): ServerSecrets {
+        decryptField(cipher.notes)?.let { notes ->
             runCatching { json.decodeFromString<ServerSecrets>(notes) }.getOrNull()?.let { return it }
         }
-        return ServerSecrets(username = item.login?.username, password = item.login?.password)
+        return ServerSecrets(username = decryptField(cipher.username), password = decryptField(cipher.password))
     }
 
-    private fun findItem(serverId: String): BwItem? {
-        val name = itemName(serverId)
-        val env = json.decodeFromString<BwListEnvelope>(
-            request("GET", "/list/object/items?search=" + encode(name), null)
+    private fun encKey() = userEncKey ?: error("Bitwarden vault is locked")
+    private fun macKey() = userMacKey ?: error("Bitwarden vault is locked")
+
+    // --- REST -------------------------------------------------------------
+
+    private fun prelogin(): KdfInfo {
+        return runCatching {
+            val body = buildJsonObject { put("email", settings.email) }.toString()
+            val (code, text) = http("POST", "$identityUrl/accounts/prelogin", body.toByteArray(),
+                "application/json", false)
+            if (code !in 200..299) return@runCatching KdfInfo(0, 600000)
+            val obj = Json.parseToJsonElement(text).jsonObject
+            KdfInfo(
+                type = pick(obj, "Kdf", "kdf")?.jsonPrimitive?.intOrNull ?: 0,
+                iterations = pick(obj, "KdfIterations", "kdfIterations")?.jsonPrimitive?.intOrNull ?: 600000,
+            )
+        }.getOrDefault(KdfInfo(0, 600000))
+    }
+
+    private fun requestToken(): TokenResult {
+        val form = listOf(
+            "grant_type" to "client_credentials",
+            "client_id" to settings.clientId,
+            "client_secret" to settings.clientSecret,
+            "scope" to "api",
+            "deviceType" to "0", // Android
+            "deviceIdentifier" to deviceId,
+            "deviceName" to "ServerCase",
+        ).joinToString("&") { (k, v) -> "${enc(k)}=${enc(v)}" }
+
+        val (code, text) = http("POST", "$identityUrl/connect/token", form.toByteArray(),
+            "application/x-www-form-urlencoded", false)
+        val obj = Json.parseToJsonElement(text).jsonObject
+        if (code !in 200..299) {
+            val msg = obj["error_description"]?.jsonPrimitive?.contentOrNull
+                ?: (obj["ErrorModel"] as? JsonObject)?.get("Message")?.jsonPrimitive?.contentOrNull
+                ?: "Bitwarden login failed"
+            error(msg)
+        }
+        val key = pick(obj, "Key", "key")?.jsonPrimitive?.contentOrNull ?: error("login response missing key")
+        return TokenResult(
+            accessToken = obj["access_token"]?.jsonPrimitive?.contentOrNull ?: "",
+            expiresInSec = obj["expires_in"]?.jsonPrimitive?.intOrNull ?: 3600,
+            key = key,
         )
-        return env.data?.data.orEmpty().firstOrNull { it.name == name }
     }
 
-    private fun encode(s: String) = URLEncoder.encode(s, "UTF-8")
-
-    private fun call(method: String, path: String, body: String?) {
-        val env = json.decodeFromString<BwResult>(request(method, path, body))
-        if (!env.success) error(env.message ?: "bw request failed")
+    private fun fetchCiphers(): List<Cipher2> {
+        check(unlocked) { "Bitwarden vault is locked" }
+        val text = api("GET", "/sync?excludeDomains=true", null)
+        val obj = Json.parseToJsonElement(text).jsonObject
+        val arr = (pick(obj, "Ciphers", "ciphers") as? JsonArray) ?: return emptyList()
+        return arr.mapNotNull { (it as? JsonObject)?.let(::Cipher2) }
     }
 
-    private fun request(method: String, path: String, body: String?): String {
-        val b = base ?: error("No bw serve URL configured")
-        val conn = (URL(b + path).openConnection() as HttpURLConnection).apply {
+    private fun findCipher(serverId: String): Cipher2? {
+        val target = settings.itemPrefix + serverId
+        return fetchCiphers().firstOrNull { decryptField(it.name) == target }
+    }
+
+    private fun api(method: String, path: String, body: String?): String {
+        check(unlocked) { "Bitwarden vault is locked" }
+        val (code, text) = http(method, "$apiUrl$path", body?.toByteArray(), "application/json", true)
+        if (code !in 200..299) error("Bitwarden $method $path failed: $code")
+        return text
+    }
+
+    private fun http(method: String, url: String, body: ByteArray?, contentType: String, bearer: Boolean): Pair<Int, String> {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method
-            connectTimeout = 10_000
-            readTimeout = 15_000
+            connectTimeout = 15_000
+            readTimeout = 20_000
+            if (bearer) accessToken?.let { setRequestProperty("Authorization", "Bearer $it") }
             if (body != null) {
                 doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-                outputStream.use { it.write(body.toByteArray()) }
+                setRequestProperty("Content-Type", contentType)
+                outputStream.use { it.write(body) }
             }
         }
         return try {
-            val ok = conn.responseCode in 200..299
-            val stream = if (ok) conn.inputStream else (conn.errorStream ?: conn.inputStream)
-            stream.bufferedReader().use { it.readText() }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else (conn.errorStream ?: conn.inputStream)
+            code to stream.bufferedReader().use { it.readText() }
         } finally {
             conn.disconnect()
         }
     }
+
+    private fun pick(obj: JsonObject, vararg keys: String): JsonElement? {
+        for (k in keys) {
+            val v = obj[k]
+            if (v != null && v != JsonNull) return v
+        }
+        return null
+    }
+
+    private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+
+    // --- crypto primitives ------------------------------------------------
+
+    private fun hkdfExpand(prk: ByteArray, info: String, length: Int): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        val infoBytes = info.toByteArray(Charsets.UTF_8)
+        var t = ByteArray(0)
+        val out = ByteArrayOutputStream()
+        var i = 1
+        while (out.size() < length) {
+            mac.init(SecretKeySpec(prk, "HmacSHA256"))
+            mac.update(t)
+            mac.update(infoBytes)
+            mac.update(i.toByte())
+            t = mac.doFinal()
+            out.write(t)
+            i++
+        }
+        return out.toByteArray().copyOf(length)
+    }
+
+    private fun hmac(key: ByteArray, message: ByteArray): ByteArray {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        return mac.doFinal(message)
+    }
+
+    private fun aes(mode: Int, key: ByteArray, iv: ByteArray, data: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(mode, SecretKeySpec(key, "AES"), IvParameterSpec(iv))
+        return cipher.doFinal(data)
+    }
+
+    private fun encryptEncString(plain: ByteArray, encKey: ByteArray, macKey: ByteArray): String {
+        val iv = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val ct = aes(Cipher.ENCRYPT_MODE, encKey, iv, plain)
+        val mac = hmac(macKey, iv + ct)
+        return "2.${b64(iv)}|${b64(ct)}|${b64(mac)}"
+    }
+
+    private fun decryptEncString(s: String, encKey: ByteArray, macKey: ByteArray): ByteArray {
+        require(s.startsWith("2.")) { "unsupported EncString type" }
+        val parts = s.substring(2).split("|")
+        require(parts.size == 3) { "malformed EncString" }
+        val iv = b64d(parts[0]); val ct = b64d(parts[1]); val mac = b64d(parts[2])
+        require(MessageDigest.isEqual(hmac(macKey, iv + ct), mac)) { "EncString MAC mismatch" }
+        return aes(Cipher.DECRYPT_MODE, encKey, iv, ct)
+    }
+
+    private fun b64(b: ByteArray) = Base64.getEncoder().encodeToString(b)
+    private fun b64d(s: String): ByteArray = Base64.getDecoder().decode(s)
+
+    private data class KdfInfo(val type: Int, val iterations: Int)
+    private data class TokenResult(val accessToken: String, val expiresInSec: Int, val key: String)
+
+    private class Cipher2(raw: JsonObject) {
+        val id: String
+        val name: String?
+        val notes: String?
+        val username: String?
+        val password: String?
+
+        init {
+            fun pick(obj: JsonObject, vararg keys: String): String? {
+                for (k in keys) obj[k]?.takeIf { it != JsonNull }?.let { return it.jsonPrimitive.contentOrNull }
+                return null
+            }
+            id = pick(raw, "Id", "id") ?: ""
+            name = pick(raw, "Name", "name")
+            notes = pick(raw, "Notes", "notes")
+            val login = (raw["Login"] ?: raw["login"]) as? JsonObject
+            username = login?.let { pick(it, "Username", "username") }
+            password = login?.let { pick(it, "Password", "password") }
+        }
+    }
 }
-
-// --- wire models ----------------------------------------------------------
-
-@Serializable
-private data class BwResult(val success: Boolean = false, val message: String? = null)
-
-@Serializable
-private data class BwUnlockBody(val password: String)
-
-@Serializable
-private data class BwLoginBody(val username: String? = null, val password: String? = null)
-
-@Serializable
-private data class BwItemBody(
-    val type: Int = 1,
-    val name: String,
-    val notes: String,
-    val login: BwLoginBody,
-)
-
-@Serializable
-private data class BwStatusEnvelope(
-    val success: Boolean = false,
-    val message: String? = null,
-    val data: BwStatusData? = null,
-)
-
-@Serializable
-private data class BwStatusData(val template: BwStatusTemplate)
-
-@Serializable
-private data class BwStatusTemplate(
-    val serverUrl: String? = null,
-    val userEmail: String? = null,
-    val status: String = "locked",
-)
-
-@Serializable
-private data class BwListEnvelope(
-    val success: Boolean = false,
-    val message: String? = null,
-    val data: BwListData? = null,
-)
-
-@Serializable
-private data class BwListData(val data: List<BwItem> = emptyList())
-
-@Serializable
-private data class BwItem(
-    val id: String,
-    val name: String,
-    val notes: String? = null,
-    val login: BwLogin? = null,
-)
-
-@Serializable
-private data class BwLogin(val username: String? = null, val password: String? = null)

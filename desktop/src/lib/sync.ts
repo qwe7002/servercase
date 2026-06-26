@@ -16,11 +16,16 @@ function withoutSecrets(cfg: ServerConfig): ServerConfig {
 export async function runExport(filePath: string): Promise<number> {
   const api = window.servercase;
   if (!api) throw new Error('bridge unavailable');
+  const settings = useSettings.getState().settings;
   const payload: SyncPayload = {
     version: 1,
     exportedAt: Date.now(),
     servers: useServers.getState().servers.map(withoutSecrets),
-    settings: useSettings.getState().settings,
+    // The Bitwarden API key is a secret; never write it to the sync file.
+    settings: {
+      ...settings,
+      bitwarden: { ...settings.bitwarden, clientId: '', clientSecret: '' },
+    },
   };
   await api.sync.export(filePath, payload);
   useSettings.getState().setAutoSync({ lastSyncedAt: payload.exportedAt });

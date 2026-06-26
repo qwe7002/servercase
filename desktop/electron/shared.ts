@@ -80,17 +80,25 @@ export interface AutoSyncSettings {
 export interface BitwardenSettings {
   /**
    * When enabled, server login credentials (username, password, private key,
-   * passphrase) are stored in the user's Bitwarden vault via the `bw` CLI
-   * rather than in the renderer's local storage. Bitwarden then becomes the
-   * authoritative, end-to-end-encrypted store that syncs secrets across
-   * devices. When disabled, secrets live only on this device and are never
-   * written to the sync file.
+   * passphrase) are stored in the user's Bitwarden vault — reached directly
+   * over the Bitwarden REST API with a clean-room crypto implementation (no
+   * `bw` CLI). Bitwarden then becomes the authoritative, end-to-end-encrypted
+   * store that syncs secrets across devices. When disabled, secrets live only
+   * on this device and are never written to the sync file.
    */
   enabled: boolean;
-  /** Absolute path to the `bw` CLI binary; empty means resolve `bw` on PATH. */
-  cliPath: string;
-  /** Self-hosted Bitwarden/Vaultwarden server URL; empty means bitwarden.com. */
+  /**
+   * Base URL of the Bitwarden server. Empty means the official cloud
+   * (identity.bitwarden.com / api.bitwarden.com). For self-hosted/Vaultwarden
+   * set the base URL; `/identity` and `/api` are appended.
+   */
   serverUrl: string;
+  /** Account email — used as the KDF salt and for prelogin. */
+  email: string;
+  /** Personal API key client_id ("user.<guid>"), from the Bitwarden web vault. */
+  clientId: string;
+  /** Personal API key client_secret. Sensitive; redacted from the sync file. */
+  clientSecret: string;
   /** Name prefix for vault items owned by ServerCase. */
   itemPrefix: string;
 }

@@ -127,7 +127,7 @@ private fun BitwardenSection(
             })
         }
         Text(
-            "Usernames, passwords and SSH keys are kept in your Bitwarden vault via a bw serve bridge and sync end-to-end. When off, secrets stay on this device and are never written to the sync file.",
+            "Usernames, passwords and SSH keys are kept in your Bitwarden vault, reached directly over the Bitwarden API (no bw CLI). The master password unlocks the vault locally and is never stored. When off, secrets stay on-device and are never written to the sync file.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
@@ -136,8 +136,30 @@ private fun BitwardenSection(
             OutlinedTextField(
                 value = bw.serverUrl,
                 onValueChange = { onUpdate(settings.copy(bitwarden = bw.copy(serverUrl = it))) },
-                label = { Text("bw serve URL (http://host:8087)") },
+                label = { Text("Server URL (blank = bitwarden.com)") },
                 singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = bw.email,
+                onValueChange = { onUpdate(settings.copy(bitwarden = bw.copy(email = it))) },
+                label = { Text("Account email") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = bw.clientId,
+                onValueChange = { onUpdate(settings.copy(bitwarden = bw.copy(clientId = it))) },
+                label = { Text("API key client_id") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = bw.clientSecret,
+                onValueChange = { onUpdate(settings.copy(bitwarden = bw.copy(clientSecret = it))) },
+                label = { Text("API key client_secret") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
@@ -152,7 +174,7 @@ private fun BitwardenSection(
             Text(
                 "Vault: " + when {
                     status == null -> "checking…"
-                    !status.available -> "unreachable"
+                    !status.available -> "not configured"
                     else -> status.state.name.lowercase() +
                         (status.userEmail?.let { " · $it" } ?: "")
                 },
@@ -162,7 +184,7 @@ private fun BitwardenSection(
             if (status != null && status.available) {
                 when (status.state) {
                     BitwardenLockState.UNAUTHENTICATED -> Text(
-                        "Not logged in. Run `bw login` then `bw serve` on a trusted host.",
+                        "Enter your account email and a personal API key (web vault → Security → Keys → API Key).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     )

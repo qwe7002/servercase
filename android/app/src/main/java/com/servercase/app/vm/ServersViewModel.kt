@@ -222,10 +222,16 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Bitwarden API key is a secret; never write it to the sync file. */
+    private fun redactedSettings(): GlobalSettings {
+        val s = _ui.value.settings
+        return s.copy(bitwarden = s.bitwarden.copy(clientId = "", clientSecret = ""))
+    }
+
     private fun writeAutoSyncFile(): Boolean = runCatching {
         val payload = SyncPayload(
             servers = _ui.value.servers.map { it.strippingSecrets() },
-            settings = _ui.value.settings,
+            settings = redactedSettings(),
         )
         File(getApplication<Application>().filesDir, "servercase-sync.json")
             .writeText(json.encodeToString(payload))
@@ -244,7 +250,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         runCatching {
             val payload = SyncPayload(
                 servers = _ui.value.servers.map { it.strippingSecrets() },
-                settings = _ui.value.settings,
+                settings = redactedSettings(),
             )
             getApplication<Application>().contentResolver.openOutputStream(uri)?.use {
                 it.write(json.encodeToString(payload).toByteArray())

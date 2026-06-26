@@ -14,8 +14,10 @@ function uid(): string {
 const DEFAULTS: GlobalSettings = {
   bitwarden: {
     enabled: false,
-    cliPath: '',
     serverUrl: '',
+    email: '',
+    clientId: '',
+    clientSecret: '',
     itemPrefix: 'ServerCase/',
   },
   snippets: [],

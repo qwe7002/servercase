@@ -10,7 +10,11 @@ enum SyncService {
     }
 
     static func makePayload(servers: [ServerConfig], settings: GlobalSettings) -> SyncPayload {
-        SyncPayload(servers: servers.map { $0.strippingSecrets() }, settings: settings)
+        // The Bitwarden API key is a secret; never write it to the sync file.
+        var redacted = settings
+        redacted.bitwarden.clientId = ""
+        redacted.bitwarden.clientSecret = ""
+        return SyncPayload(servers: servers.map { $0.strippingSecrets() }, settings: redacted)
     }
 
     static func encode(_ payload: SyncPayload) throws -> Data {

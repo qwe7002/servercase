@@ -61,16 +61,22 @@ struct SettingsView: View {
         Section {
             Toggle("Store credentials in Bitwarden", isOn: $draft.bitwarden.enabled)
             if draft.bitwarden.enabled {
-                TextField("bw serve URL (http://host:8087)", text: $draft.bitwarden.serverUrl)
+                TextField("Server URL (blank = bitwarden.com)", text: $draft.bitwarden.serverUrl)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .keyboardType(.URL)
+                TextField("Account email", text: $draft.bitwarden.email)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardType(.emailAddress)
+                TextField("API key client_id", text: $draft.bitwarden.clientId)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                SecureField("API key client_secret", text: $draft.bitwarden.clientSecret)
                 TextField("Item name prefix", text: $draft.bitwarden.itemPrefix)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                 statusRow
                 if let status = model.bitwardenStatus, status.available {
                     switch status.state {
                     case .unauthenticated:
-                        Text("Not logged in. Run `bw login` then `bw serve` on a trusted host.")
+                        Text("Enter your account email and a personal API key (web vault → Security → Keys → API Key).")
                             .font(.footnote).foregroundStyle(.secondary)
                     case .locked:
                         SecureField("Master password", text: $master)
@@ -85,7 +91,7 @@ struct SettingsView: View {
         } header: {
             Text("Keychain")
         } footer: {
-            Text("Usernames, passwords and SSH keys are kept in your Bitwarden vault via a `bw serve` bridge and sync end-to-end. When off, secrets stay on this device and are never written to the sync file.")
+            Text("Usernames, passwords and SSH keys are kept in your Bitwarden vault, reached directly over the Bitwarden API (no `bw` CLI). The master password unlocks the vault locally and is never stored. When off, secrets stay on-device and are never written to the sync file.")
         }
     }
 
@@ -95,7 +101,7 @@ struct SettingsView: View {
             Spacer()
             if let status = model.bitwardenStatus {
                 if !status.available {
-                    Text("unreachable").foregroundStyle(Palette.danger)
+                    Text("not configured").foregroundStyle(.secondary)
                 } else {
                     Text(status.userEmail.map { "\(status.state.rawValue) · \($0)" } ?? status.state.rawValue)
                         .foregroundStyle(status.state == .unlocked ? Palette.good : .secondary)

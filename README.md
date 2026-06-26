@@ -49,11 +49,14 @@ See each subdirectory's `README.md` for build instructions.
 
 These are working v1 foundations. All three clients now ship global settings
 (a Bitwarden-backed keychain for credentials, reusable command snippets, and
-config auto-sync) and a file manager. The desktop uses the `bw` CLI and ssh2's
-SFTP; the mobile clients use a `bw serve` REST bridge and a command-based file
-manager, keeping the same product design while staying idiomatic per platform.
-Known follow-ups: private-key auth on iOS, full PTY terminals on mobile,
-host-key pinning, and Docker / systemd management panels.
+config auto-sync) and a file manager. The Bitwarden keychain is a **clean-room
+client** — each platform speaks the Bitwarden REST API directly and
+reimplements the account crypto (PBKDF2 → HKDF → AES‑CBC‑256 + HMAC‑SHA256)
+with native primitives (Node `crypto`, CryptoKit/CommonCrypto, `javax.crypto`),
+with no `bw` CLI or official SDK. The desktop file manager uses ssh2's SFTP;
+the mobile ones are command-based — same product design, idiomatic per
+platform. Known follow-ups: Argon2id KDF support, private-key auth on iOS, full
+PTY terminals on mobile, host-key pinning, and Docker / systemd panels.
 
 ## License
 

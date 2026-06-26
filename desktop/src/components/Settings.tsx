@@ -90,7 +90,7 @@ function BitwardenSection() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bw.cliPath, bw.serverUrl, bw.itemPrefix]);
+  }, [bw.serverUrl, bw.email, bw.clientId, bw.clientSecret, bw.itemPrefix]);
 
   const toggle = async (next: boolean) => {
     setMsg(null);
@@ -160,10 +160,12 @@ function BitwardenSection() {
             <ShieldCheck className="size-4" /> Store credentials in Bitwarden
           </Label>
           <p className="text-sm text-muted-foreground">
-            Usernames, passwords and SSH keys are kept in your Bitwarden vault
-            via the <code>bw</code> CLI and synced end-to-end across devices.
-            When off, secrets stay on this device only and are never written to
-            the sync file.
+            Usernames, passwords and SSH keys are kept in your Bitwarden vault,
+            reached directly over the Bitwarden API (no <code>bw</code> CLI) and
+            synced end-to-end. Authenticate with a personal API key; the master
+            password unlocks the vault locally and is never stored. When off,
+            secrets stay on this device only and are never written to the sync
+            file.
           </p>
         </div>
         <Switch checked={bw.enabled} onCheckedChange={toggle} />
@@ -173,15 +175,6 @@ function BitwardenSection() {
         <>
           <Separator />
           <div className="grid gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="bw-cli">`bw` CLI path (optional)</Label>
-              <Input
-                id="bw-cli"
-                placeholder="bw (resolved on PATH)"
-                value={bw.cliPath}
-                onChange={(e) => setBitwarden({ cliPath: e.target.value })}
-              />
-            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="bw-server">Server URL (self-hosted)</Label>
@@ -193,13 +186,43 @@ function BitwardenSection() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="bw-prefix">Item name prefix</Label>
+                <Label htmlFor="bw-email">Account email</Label>
                 <Input
-                  id="bw-prefix"
-                  value={bw.itemPrefix}
-                  onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+                  id="bw-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={bw.email}
+                  onChange={(e) => setBitwarden({ email: e.target.value })}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="bw-client-id">API key client_id</Label>
+                <Input
+                  id="bw-client-id"
+                  placeholder="user.xxxxxxxx-…"
+                  value={bw.clientId}
+                  onChange={(e) => setBitwarden({ clientId: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="bw-client-secret">API key client_secret</Label>
+                <Input
+                  id="bw-client-secret"
+                  type="password"
+                  value={bw.clientSecret}
+                  onChange={(e) => setBitwarden({ clientSecret: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="bw-prefix">Item name prefix</Label>
+              <Input
+                id="bw-prefix"
+                value={bw.itemPrefix}
+                onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+              />
             </div>
           </div>
 
@@ -211,16 +234,10 @@ function BitwardenSection() {
               <VaultBadge status={status} />
             </div>
 
-            {status && !status.available && (
-              <p className="text-sm text-destructive">
-                The <code>bw</code> CLI was not found. Install it and ensure it
-                is on your PATH (or set an explicit path above).
-              </p>
-            )}
-            {status?.available && status.state === 'unauthenticated' && (
+            {status?.available === false && (
               <p className="text-sm text-muted-foreground">
-                Not logged in. Run <code>bw login</code> in a terminal first
-                (Bitwarden login can require 2FA), then return here to unlock.
+                Enter your account email and a personal API key (Bitwarden web
+                vault → Account Settings → Security → Keys → View API Key).
               </p>
             )}
             {status?.available && status.state === 'locked' && (
@@ -264,15 +281,14 @@ function BitwardenSection() {
 
 function VaultBadge({ status }: { status: BitwardenStatus | null }) {
   if (!status) return <Badge variant="secondary">checking…</Badge>;
-  if (!status.available) return <Badge variant="destructive">CLI missing</Badge>;
+  if (!status.available) return <Badge variant="outline">not configured</Badge>;
   if (status.state === 'unlocked')
     return (
       <Badge>
         unlocked{status.userEmail ? ` · ${status.userEmail}` : ''}
       </Badge>
     );
-  if (status.state === 'locked') return <Badge variant="secondary">locked</Badge>;
-  return <Badge variant="outline">logged out</Badge>;
+  return <Badge variant="secondary">locked</Badge>;
 }
 
 // ── Snippets ──────────────────────────────────────────────────────────────

@@ -13,9 +13,12 @@ over SwiftNIO).
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download) over the live connection
 - **Global settings** (gear in the server list):
-  - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault
-    through a `bw serve` REST bridge and sync end-to-end. When off, secrets
-    stay on-device and are never written to the sync file.
+  - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault,
+    reached directly over the Bitwarden REST API with a clean-room crypto
+    implementation (no `bw` CLI). Authenticate with a personal API key; the
+    master password derives the vault key locally. Only the PBKDF2 KDF is
+    supported. When off, secrets stay on-device and are never written to the
+    sync file.
   - **Snippets** — reusable terminal commands.
   - **Auto-sync** — periodic JSON export of servers + settings (secrets
     excluded), with document-picker export/import.
@@ -32,7 +35,7 @@ Models/
 Services/
   SSHService.swift        Citadel connection (actor): run() for commands
   RemoteFiles.swift       command-based SFTP-style file operations
-  BitwardenVault.swift    actor talking to a `bw serve` REST bridge
+  BitwardenVault.swift    clean-room Bitwarden client (CommonCrypto + CryptoKit)
   SettingsStore.swift     UserDefaults settings persistence
   SyncService.swift       secret-free config export/import
   ServerStore.swift       UserDefaults persistence
@@ -45,9 +48,9 @@ Views/
 ServerCaseApp.swift       @main App entry
 ```
 
-The file manager and Bitwarden integration are command/REST based rather than
-relying on Citadel's SFTP API, so they need nothing on the host beyond
-coreutils and (for the keychain) a reachable `bw serve` endpoint.
+The file manager is command-based (over the SSH exec channel) rather than
+relying on Citadel's SFTP API, so it needs nothing on the host beyond
+coreutils. The Bitwarden keychain talks to the Bitwarden REST API directly.
 
 ## Build
 

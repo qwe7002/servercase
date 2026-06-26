@@ -21,14 +21,20 @@ data class AutoSyncSettings(
 )
 
 /**
- * Bitwarden keychain configuration. On Android we talk to the Bitwarden CLI's
- * REST bridge (`bw serve`) over HTTP rather than shelling out to the CLI.
+ * Bitwarden keychain configuration. We speak the Bitwarden REST API directly
+ * (clean-room crypto, no `bw` CLI), authenticating with a personal API key.
  */
 @Serializable
 data class BitwardenSettings(
     val enabled: Boolean = false,
-    /** Base URL of a running `bw serve`, e.g. http://127.0.0.1:8087 */
+    /** Base URL of the server; empty = cloud. Self-hosted gets /identity + /api. */
     val serverUrl: String = "",
+    /** Account email — used as the KDF salt and for prelogin. */
+    val email: String = "",
+    /** Personal API key client_id ("user.<guid>"). */
+    val clientId: String = "",
+    /** Personal API key client_secret. Redacted from the sync file. */
+    val clientSecret: String = "",
     /** Name prefix for vault items owned by ServerCase. */
     val itemPrefix: String = "ServerCase/",
 )

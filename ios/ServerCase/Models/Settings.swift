@@ -14,13 +14,20 @@ struct AutoSyncSettings: Codable, Equatable {
     var lastSyncedAt: Date? = nil
 }
 
-/// Bitwarden keychain configuration. On iOS we talk to the Bitwarden CLI's
-/// REST bridge (`bw serve`) over HTTP rather than shelling out to the CLI, so
-/// the only thing we need is the base URL of that bridge.
+/// Bitwarden keychain configuration. We speak the Bitwarden REST API directly
+/// (clean-room crypto, no `bw` CLI), authenticating with a personal API key.
 struct BitwardenSettings: Codable, Equatable {
     var enabled: Bool = false
-    /// Base URL of a running `bw serve`, e.g. http://127.0.0.1:8087
+    /// Base URL of the server; empty means the official cloud. For
+    /// self-hosted/Vaultwarden set the base URL (`/identity` and `/api` are
+    /// appended).
     var serverUrl: String = ""
+    /// Account email — used as the KDF salt and for prelogin.
+    var email: String = ""
+    /// Personal API key client_id ("user.<guid>").
+    var clientId: String = ""
+    /// Personal API key client_secret. Redacted from the sync file.
+    var clientSecret: String = ""
     /// Name prefix for vault items owned by ServerCase.
     var itemPrefix: String = "ServerCase/"
 }

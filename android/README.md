@@ -12,9 +12,12 @@ Jetpack Compose, Material 3 and SSHJ.
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download via SAF) over the live connection
 - **Global settings** (gear in the server list):
-  - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault
-    through a `bw serve` REST bridge and sync end-to-end. When off, secrets
-    stay on-device and are never written to the sync file.
+  - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault,
+    reached directly over the Bitwarden REST API with a clean-room crypto
+    implementation (no `bw` CLI). Authenticate with a personal API key; the
+    master password derives the vault key locally. Only the PBKDF2 KDF is
+    supported. When off, secrets stay on-device and are never written to the
+    sync file.
   - **Snippets** — reusable terminal commands.
   - **Auto-sync** — periodic JSON export of servers + settings (secrets
     excluded), with SAF export/import.
@@ -30,7 +33,7 @@ data/
   StatusParser.kt         STATUS_COMMAND + /proc parsing, CPU/net deltas
   ServerRepository.kt     DataStore-backed persistence
   SettingsRepository.kt   DataStore-backed settings persistence
-  bitwarden/BitwardenVault.kt  HTTP client for a `bw serve` REST bridge
+  bitwarden/BitwardenVault.kt  clean-room Bitwarden client (javax.crypto)
   ssh/SshClient.kt        SSHJ connection: exec (status) + shell (terminal)
   ssh/RemoteFiles.kt      command-based SFTP-style file operations
 vm/ServersViewModel.kt    StateFlow UiState, connections, vault, polling, sync
