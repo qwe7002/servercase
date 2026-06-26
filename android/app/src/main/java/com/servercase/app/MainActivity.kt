@@ -13,8 +13,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.servercase.app.data.ConnectionState
 import com.servercase.app.ui.DashboardScreen
+import com.servercase.app.ui.FilesScreen
 import com.servercase.app.ui.ServerFormScreen
 import com.servercase.app.ui.ServerListScreen
+import com.servercase.app.ui.SettingsScreen
 import com.servercase.app.ui.TerminalScreen
 import com.servercase.app.ui.theme.ServerCaseTheme
 import com.servercase.app.vm.ServersViewModel
@@ -37,6 +39,21 @@ class MainActivity : ComponentActivity() {
                             onOpen = { nav.navigate("dashboard/${it.id}") },
                             onEdit = { nav.navigate("form?id=${it.id}") },
                             onDelete = { vm.delete(it.id) },
+                            onOpenSettings = { nav.navigate("settings") },
+                        )
+                    }
+                    composable("settings") {
+                        SettingsScreen(
+                            state = state,
+                            onBack = { nav.popBackStack() },
+                            onUpdateSettings = { vm.updateSettings(it) },
+                            onRefreshBitwarden = { vm.refreshBitwardenStatus() },
+                            onUnlock = { vm.unlockVault(it) },
+                            onLock = { vm.lockVault() },
+                            onPushAll = { vm.pushAllSecretsToVault() },
+                            onSyncNow = { vm.syncNow() },
+                            onExport = { vm.exportTo(it) },
+                            onImport = { vm.importFrom(it) },
                         )
                     }
                     composable(
@@ -61,6 +78,7 @@ class MainActivity : ComponentActivity() {
                             onConnect = { vm.connect(server) },
                             onDisconnect = { vm.disconnect(id) },
                             onOpenTerminal = { nav.navigate("terminal/$id") },
+                            onOpenFiles = { nav.navigate("files/$id") },
                             onStartPolling = { vm.startPolling(id) },
                             onStopPolling = { vm.stopPolling() },
                             onBack = { nav.popBackStack() },
@@ -68,7 +86,15 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("terminal/{id}") { entry ->
                         val id = entry.arguments?.getString("id") ?: return@composable
-                        TerminalScreen(client = vm.client(id), onBack = { nav.popBackStack() })
+                        TerminalScreen(
+                            client = vm.client(id),
+                            snippets = state.settings.snippets,
+                            onBack = { nav.popBackStack() },
+                        )
+                    }
+                    composable("files/{id}") { entry ->
+                        val id = entry.arguments?.getString("id") ?: return@composable
+                        FilesScreen(client = vm.client(id), onBack = { nav.popBackStack() })
                     }
                 }
             }

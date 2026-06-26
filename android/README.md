@@ -8,7 +8,16 @@ Jetpack Compose, Material 3 and SSHJ.
 - Add / edit / delete servers (password or private-key auth)
 - Live status dashboard: CPU%, memory, swap, per-mount disks, network
   throughput, load average and uptime — parsed from `/proc` + `df`
-- Interactive SSH shell (line-oriented terminal)
+- Interactive SSH shell (line-oriented terminal) with a snippet menu
+- Remote file manager (browse, view/edit text, mkdir, rename, delete,
+  upload/download via SAF) over the live connection
+- **Global settings** (gear in the server list):
+  - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault
+    through a `bw serve` REST bridge and sync end-to-end. When off, secrets
+    stay on-device and are never written to the sync file.
+  - **Snippets** — reusable terminal commands.
+  - **Auto-sync** — periodic JSON export of servers + settings (secrets
+    excluded), with SAF export/import.
 - Server list persisted locally with DataStore (kotlinx.serialization)
 
 ## Architecture (MVVM)
@@ -17,14 +26,19 @@ Jetpack Compose, Material 3 and SSHJ.
 data/
   ServerConfig.kt         Server model (@Serializable)
   ServerStatus.kt         Parsed status model
+  Settings.kt             GlobalSettings / Snippet / AutoSync / Bitwarden models
   StatusParser.kt         STATUS_COMMAND + /proc parsing, CPU/net deltas
   ServerRepository.kt     DataStore-backed persistence
+  SettingsRepository.kt   DataStore-backed settings persistence
+  bitwarden/BitwardenVault.kt  HTTP client for a `bw serve` REST bridge
   ssh/SshClient.kt        SSHJ connection: exec (status) + shell (terminal)
-vm/ServersViewModel.kt    StateFlow UiState, connections, 3s polling
+  ssh/RemoteFiles.kt      command-based SFTP-style file operations
+vm/ServersViewModel.kt    StateFlow UiState, connections, vault, polling, sync
 ui/
   theme/Theme.kt          Material3 dark theme + usage colors
   components/Indicators.kt Gauge + UsageBar
-  ServerListScreen.kt / ServerFormScreen.kt / DashboardScreen.kt / TerminalScreen.kt
+  ServerListScreen / ServerFormScreen / DashboardScreen / TerminalScreen
+  SettingsScreen / FilesScreen
 MainActivity.kt           Navigation-Compose host
 ```
 

@@ -49,10 +49,25 @@ struct TerminalView: View {
         }
         .navigationTitle("Terminal")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !model.settings.snippets.isEmpty {
+                    Menu {
+                        ForEach(model.settings.snippets) { snippet in
+                            Button(snippet.name) { run(snippet.command) }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    }
+                }
+            }
+        }
     }
 
-    private func submit() {
-        let cmd = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submit() { run(command) }
+
+    private func run(_ raw: String) {
+        let cmd = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cmd.isEmpty, let service = model.service(server.id) else { return }
         command = ""
         running = true

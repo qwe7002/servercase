@@ -4,6 +4,7 @@ struct ServerListView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editing: ServerConfig?
     @State private var addingNew = false
+    @State private var showingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -37,6 +38,9 @@ struct ServerListView: View {
                 DashboardView(server: server)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { addingNew = true } label: { Image(systemName: "plus") }
                 }
@@ -46,6 +50,9 @@ struct ServerListView: View {
             }
             .sheet(item: $editing) { server in
                 ServerFormView(existing: server)
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
             }
         }
     }

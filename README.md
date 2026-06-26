@@ -47,12 +47,13 @@ See each subdirectory's `README.md` for build instructions.
 
 ## Status
 
-These are working v1 foundations. The desktop client additionally ships global
-settings (a Bitwarden-backed keychain for credentials, reusable command
-snippets, and config auto-sync) and a FileZilla-style SFTP file manager. Known
-follow-ups: bringing those panels to the mobile clients, private-key auth on
-iOS, full PTY terminals on mobile, host-key pinning, and Docker / systemd
-management panels.
+These are working v1 foundations. All three clients now ship global settings
+(a Bitwarden-backed keychain for credentials, reusable command snippets, and
+config auto-sync) and a file manager. The desktop uses the `bw` CLI and ssh2's
+SFTP; the mobile clients use a `bw serve` REST bridge and a command-based file
+manager, keeping the same product design while staying idiomatic per platform.
+Known follow-ups: private-key auth on iOS, full PTY terminals on mobile,
+host-key pinning, and Docker / systemd management panels.
 
 ## License
 

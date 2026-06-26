@@ -34,6 +34,13 @@ struct DashboardView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    NavigationLink {
+                        FilesView(server: server)
+                    } label: {
+                        Label("Browse files", systemImage: "folder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 } else {
                     placeholder("Collecting status…")
                 }
