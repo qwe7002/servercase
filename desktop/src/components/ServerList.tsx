@@ -4,6 +4,12 @@ import { useServers } from '../store/servers';
 import { useSettings } from '../store/settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import {
   ChevronDown,
@@ -163,51 +169,44 @@ function ServerRow({
   const removeServer = useServers((s) => s.removeServer);
 
   return (
-    <div
-      className={cn(
-        'group flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 transition-colors hover:bg-accent/70',
-        selectedId === srv.id && 'border-border bg-accent',
-      )}
-      onClick={() => select(srv.id)}
-    >
-      <span
-        className={cn(
-          'size-2 shrink-0 rounded-full bg-muted-foreground',
-          state === 'connected' && 'bg-emerald-500',
-          state === 'connecting' && 'animate-pulse bg-amber-500',
-          state === 'error' && 'bg-destructive',
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{srv.name}</div>
-        <div className="truncate text-xs text-muted-foreground">
-          {srv.username}@{srv.host} · {STATE_LABEL[state]}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            'flex cursor-pointer items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 transition-colors hover:bg-accent/70',
+            selectedId === srv.id && 'border-border bg-accent',
+          )}
+          onClick={() => select(srv.id)}
+        >
+          <span
+            className={cn(
+              'size-2 shrink-0 rounded-full bg-muted-foreground',
+              state === 'connected' && 'bg-emerald-500',
+              state === 'connecting' && 'animate-pulse bg-amber-500',
+              state === 'error' && 'bg-destructive',
+            )}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">{srv.name}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {srv.username}@{srv.host} · {STATE_LABEL[state]}
+            </div>
+          </div>
         </div>
-      </div>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-7 opacity-0 group-hover:opacity-100"
-        title="Edit"
-        onClick={(e) => {
-          e.stopPropagation();
-          onEdit(srv);
-        }}
-      >
-        <Pencil className="size-3.5" />
-      </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-7 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100"
-        title="Delete"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (confirm(`Delete "${srv.name}"?`)) removeServer(srv.id);
-        }}
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
-    </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => onEdit(srv)}>
+          <Pencil /> Edit
+        </ContextMenuItem>
+        <ContextMenuItem
+          className="text-destructive focus:text-destructive"
+          onSelect={() => {
+            if (confirm(`Delete "${srv.name}"?`)) removeServer(srv.id);
+          }}
+        >
+          <Trash2 /> Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

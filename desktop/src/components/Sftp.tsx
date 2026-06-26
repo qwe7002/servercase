@@ -6,6 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
@@ -343,14 +350,13 @@ export function Sftp({ serverId }: Props) {
                     Last modified
                   </th>
                   <th className="px-3 py-2 text-left font-medium">Permissions</th>
-                  <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {list?.entries.length === 0 && (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={5}
                       className="px-4 py-8 text-center text-muted-foreground"
                     >
                       Empty directory.
@@ -358,53 +364,63 @@ export function Sftp({ serverId }: Props) {
                   </tr>
                 )}
                 {list?.entries.map((entry) => (
-                  <tr
-                    key={entry.path}
-                    className={`group cursor-default border-b border-border/40 ${
-                      selected === entry.path ? 'bg-accent' : 'hover:bg-accent/50'
-                    }`}
-                    onClick={() => setSelected(entry.path)}
-                    onDoubleClick={() => open(entry)}
-                  >
-                    <td className="px-3 py-1.5">
-                      <span className="flex items-center gap-2">
-                        <EntryIcon type={entry.type} />
-                        <span className="truncate">{entry.name}</span>
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                      {entry.type === 'file' ? formatBytes(entry.sizeBytes) : ''}
-                    </td>
-                    <td className="px-3 py-1.5 text-muted-foreground">
-                      {typeLabel(entry)}
-                    </td>
-                    <td className="px-3 py-1.5 text-muted-foreground">
-                      {entry.modifiedAt
-                        ? new Date(entry.modifiedAt).toLocaleString()
-                        : ''}
-                    </td>
-                    <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                      {entry.mode}
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100">
-                        {entry.type === 'file' && (
-                          <IconBtn
-                            title="Download"
-                            onClick={() => download(entry)}
-                          >
-                            <Download className="size-3.5" />
-                          </IconBtn>
-                        )}
-                        <IconBtn title="Rename" onClick={() => rename(entry)}>
-                          <Pencil className="size-3.5" />
-                        </IconBtn>
-                        <IconBtn title="Delete" danger onClick={() => remove(entry)}>
-                          <Trash2 className="size-3.5" />
-                        </IconBtn>
-                      </div>
-                    </td>
-                  </tr>
+                  <ContextMenu key={entry.path}>
+                    <ContextMenuTrigger asChild>
+                      <tr
+                        className={`cursor-default border-b border-border/40 ${
+                          selected === entry.path
+                            ? 'bg-accent'
+                            : 'hover:bg-accent/50'
+                        }`}
+                        onClick={() => setSelected(entry.path)}
+                        onDoubleClick={() => open(entry)}
+                      >
+                        <td className="px-3 py-1.5">
+                          <span className="flex items-center gap-2">
+                            <EntryIcon type={entry.type} />
+                            <span className="truncate">{entry.name}</span>
+                          </span>
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                          {entry.type === 'file'
+                            ? formatBytes(entry.sizeBytes)
+                            : ''}
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {typeLabel(entry)}
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {entry.modifiedAt
+                            ? new Date(entry.modifiedAt).toLocaleString()
+                            : ''}
+                        </td>
+                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                          {entry.mode}
+                        </td>
+                      </tr>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem onSelect={() => open(entry)}>
+                        {entry.type === 'directory' ? <FolderOpen /> : <FileText />}{' '}
+                        Open
+                      </ContextMenuItem>
+                      {entry.type === 'file' && (
+                        <ContextMenuItem onSelect={() => download(entry)}>
+                          <Download /> Download
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuItem onSelect={() => rename(entry)}>
+                        <Pencil /> Rename
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onSelect={() => remove(entry)}
+                      >
+                        <Trash2 /> Delete
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 ))}
               </tbody>
             </table>
@@ -534,35 +550,6 @@ function EntryIcon({ type }: { type: SftpEntry['type'] }) {
   if (type === 'file')
     return <FileText className="size-4 shrink-0 text-muted-foreground" />;
   return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
-}
-
-function IconBtn({
-  children,
-  title,
-  danger,
-  onClick,
-}: {
-  children: React.ReactNode;
-  title: string;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      size="icon"
-      variant="ghost"
-      title={title}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className={
-        danger ? 'size-7 text-muted-foreground hover:text-destructive' : 'size-7'
-      }
-    >
-      {children}
-    </Button>
-  );
 }
 
 function typeLabel(entry: SftpEntry): string {
