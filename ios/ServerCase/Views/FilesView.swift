@@ -31,8 +31,20 @@ struct FilesView: View {
             header
             Divider()
             if loading && listing == nil {
-                ProgressView().padding(40)
-                Spacer()
+                List {
+                    ForEach(0..<10, id: \.self) { _ in
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.text").foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Placeholder file name")
+                                Text("123 KB · rw-r--r-- · placeholder")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .redacted(reason: .placeholder)
             } else {
                 List {
                     ForEach(listing?.entries ?? []) { entry in

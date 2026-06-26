@@ -4,6 +4,7 @@ import { formatBytes } from '../format';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   ArrowUp,
   ChevronDown,
@@ -60,7 +61,9 @@ export function Sftp({ serverId }: Props) {
   const [treeChildren, setTreeChildren] = useState<Record<string, SftpEntry[]>>(
     {},
   );
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['/']));
+  const treeChildrenRef = useRef(treeChildren);
+  treeChildrenRef.current = treeChildren;
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [log, setLog] = useState<LogLine[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
@@ -97,28 +100,34 @@ export function Sftp({ serverId }: Props) {
       setList(result);
       setCwd(result.path);
       setSelected(null);
-      setTreeChildren((prev) => ({
-        ...prev,
-        [result.path]: result.entries.filter((e) => e.type === 'directory'),
-      }));
-      setExpanded((prev) => new Set(prev).add(result.path));
       addLog('info', `Listing ${result.path} — ${result.entries.length} items`);
+
+      // Reveal this path in the tree: cache each ancestor's subdirectories and
+      // expand the whole chain from "/" down to the current directory, so the
+      // tree always mirrors where you are.
+      const chain = ancestorPaths(result.path);
+      const updates: Record<string, SftpEntry[]> = {
+        [result.path]: result.entries.filter((e) => e.type === 'directory'),
+      };
+      await Promise.all(
+        chain.map(async (p) => {
+          if (p === result.path || treeChildrenRef.current[p]) return;
+          const r = await fetchDir(p);
+          if (r) updates[p] = r.entries.filter((e) => e.type === 'directory');
+        }),
+      );
+      setTreeChildren((prev) => ({ ...prev, ...updates }));
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const p of chain) next.add(p);
+        return next;
+      });
     },
     [fetchDir, addLog],
   );
 
   useEffect(() => {
-    // Resolve the home directory, then anchor the tree at root.
-    void (async () => {
-      const home = await fetchDir('.');
-      if (home) {
-        setTreeChildren((prev) => ({
-          ...prev,
-          [home.path]: home.entries.filter((e) => e.type === 'directory'),
-        }));
-        await navigate(home.path);
-      }
-    })();
+    void navigate('.');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId]);
 
@@ -317,9 +326,12 @@ export function Sftp({ serverId }: Props) {
           />
         </div>
 
-        <div className="min-w-0 flex-1 overflow-auto">
+        <div className="relative min-w-0 flex-1 overflow-auto">
+          {loading && list && (
+            <div className="sticky inset-x-0 top-0 z-20 h-0.5 animate-pulse bg-primary/70" />
+          )}
           {loading && !list ? (
-            <p className="p-6 text-sm text-muted-foreground">Loading…</p>
+            <FileListSkeleton />
           ) : (
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-card text-xs text-muted-foreground">
@@ -497,6 +509,23 @@ function TreeNode({
   );
 }
 
+function FileListSkeleton() {
+  return (
+    <div className="space-y-1 p-3" aria-busy="true" aria-label="Loading files">
+      {Array.from({ length: 12 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-1 py-1.5">
+          <Skeleton className="size-4 shrink-0 rounded" />
+          <Skeleton
+            className="h-3.5"
+            style={{ width: `${38 + ((i * 13) % 46)}%` }}
+          />
+          <Skeleton className="ml-auto h-3 w-12 shrink-0" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function EntryIcon({ type }: { type: SftpEntry['type'] }) {
   if (type === 'directory')
     return <Folder className="size-4 shrink-0 text-amber-500" />;
@@ -549,4 +578,16 @@ function typeLabel(entry: SftpEntry): string {
 function joinPath(dir: string, name: string): string {
   const base = dir.replace(/\/+$/, '');
   return base === '' ? `/${name}` : `${base}/${name}`;
+}
+
+/** ['/', '/a', '/a/b'] for '/a/b' — the chain from root to `abs` inclusive. */
+function ancestorPaths(abs: string): string[] {
+  const parts = abs.split('/').filter(Boolean);
+  const out = ['/'];
+  let cur = '';
+  for (const p of parts) {
+    cur += '/' + p;
+    out.push(cur);
+  }
+  return out;
 }

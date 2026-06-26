@@ -5,6 +5,12 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +18,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -175,39 +184,38 @@ fun FilesScreen(client: SshClient?, onBack: () -> Unit) {
                 )
             }
 
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                items(listing?.entries ?: emptyList(), key = { it.path }) { entry ->
-                    FileRow(
-                        entry = entry,
-                        onOpen = {
-                            if (entry.isDirectory) load(entry.path)
-                            else if (entry.sizeBytes <= MAX_EDIT_BYTES) {
+            if (loading && listing == null) {
+                FilesSkeleton(Modifier.weight(1f))
+            } else {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                    items(listing?.entries ?: emptyList(), key = { it.path }) { entry ->
+                        FileRow(
+                            entry = entry,
+                            onOpen = {
+                                if (entry.isDirectory) load(entry.path)
+                                else if (entry.sizeBytes <= MAX_EDIT_BYTES) {
+                                    val f = files ?: return@FileRow
+                                    scope.launch {
+                                        runCatching { f.readText(entry.path) }
+                                            .onSuccess { editing = EditingFile(entry, it) }
+                                            .onFailure { message = it.message }
+                                    }
+                                } else message = "${entry.name} is too large to edit — use Save."
+                            },
+                            onRename = { renaming = entry },
+                            onDelete = {
                                 val f = files ?: return@FileRow
                                 scope.launch {
-                                    runCatching { f.readText(entry.path) }
-                                        .onSuccess { editing = EditingFile(entry, it) }
-                                        .onFailure { message = it.message }
+                                    runCatching { f.remove(entry.path, entry.isDirectory) }
+                                        .onSuccess { load(path) }.onFailure { message = it.message }
                                 }
-                            } else message = "${entry.name} is too large to edit — use Save."
-                        },
-                        onRename = { renaming = entry },
-                        onDelete = {
-                            val f = files ?: return@FileRow
-                            scope.launch {
-                                runCatching { f.remove(entry.path, entry.isDirectory) }
-                                    .onSuccess { load(path) }.onFailure { message = it.message }
-                            }
-                        },
-                        onDownload = { pendingDownload = entry; downloadLauncher.launch(entry.name) },
-                    )
+                            },
+                            onDownload = { pendingDownload = entry; downloadLauncher.launch(entry.name) },
+                        )
+                    }
                 }
             }
 
-            if (loading && listing == null) {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text("Loading…", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                }
-            }
             message?.let {
                 Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -333,6 +341,34 @@ private fun NameDialog(title: String, initial: String, onDismiss: () -> Unit, on
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun FilesSkeleton(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+        label = "alpha",
+    )
+    val color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha * 0.4f)
+    fun bar() = Modifier.background(color, RoundedCornerShape(4.dp))
+
+    Column(modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        repeat(10) { i ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(22.dp).then(bar()))
+                Column(
+                    Modifier.padding(start = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(Modifier.fillMaxWidth(0.4f + (i % 3) * 0.15f).height(12.dp).then(bar()))
+                    Box(Modifier.fillMaxWidth(0.3f).height(10.dp).then(bar()))
+                }
+            }
+        }
+    }
 }
 
 private fun detail(entry: RemoteFile): String {
