@@ -14,8 +14,10 @@ function uid(): string {
 const DEFAULTS: GlobalSettings = {
   bitwarden: {
     enabled: false,
-    cliPath: '',
     serverUrl: '',
+    email: '',
+    clientId: '',
+    clientSecret: '',
     itemPrefix: 'ServerCase/',
   },
   snippets: [],
@@ -24,6 +26,11 @@ const DEFAULTS: GlobalSettings = {
     intervalMinutes: 30,
     filePath: '',
   },
+  bridge: {
+    enabled: false,
+    port: 8765,
+  },
+  groups: [],
 };
 
 interface SettingsState {
@@ -31,10 +38,15 @@ interface SettingsState {
 
   setBitwarden: (patch: Partial<BitwardenSettings>) => void;
   setAutoSync: (patch: Partial<AutoSyncSettings>) => void;
+  setBridge: (patch: Partial<GlobalSettings['bridge']>) => void;
 
   addSnippet: (s: Omit<Snippet, 'id'>) => void;
   updateSnippet: (s: Snippet) => void;
   removeSnippet: (id: string) => void;
+
+  addGroup: (name: string) => string;
+  renameGroup: (id: string, name: string) => void;
+  removeGroup: (id: string) => void;
 
   /** Replace the whole settings object (used when importing a sync file). */
   replaceSettings: (s: GlobalSettings) => void;
@@ -59,6 +71,13 @@ export const useSettings = create<SettingsState>()(
             autoSync: { ...s.settings.autoSync, ...patch },
           },
         })),
+      setBridge: (patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            bridge: { ...s.settings.bridge, ...patch },
+          },
+        })),
 
       addSnippet: (snippet) =>
         set((s) => ({
@@ -81,6 +100,28 @@ export const useSettings = create<SettingsState>()(
           settings: {
             ...s.settings,
             snippets: s.settings.snippets.filter((x) => x.id !== id),
+          },
+        })),
+
+      addGroup: (name) => {
+        const id = uid();
+        set((s) => ({
+          settings: { ...s.settings, groups: [...s.settings.groups, { id, name }] },
+        }));
+        return id;
+      },
+      renameGroup: (id, name) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            groups: s.settings.groups.map((g) => (g.id === id ? { ...g, name } : g)),
+          },
+        })),
+      removeGroup: (id) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            groups: s.settings.groups.filter((g) => g.id !== id),
           },
         })),
 

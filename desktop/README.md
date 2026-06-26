@@ -5,7 +5,9 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
 
 ## Features
 
-- Add / edit / delete servers (password or private-key auth)
+- Add / edit / delete servers (password or private-key auth), organized into
+  managed, collapsible **groups** (assigned via a dropdown), with a sidebar
+  **search** box
 - Live status dashboard: CPU%, memory, swap, per-mount disk usage, network
   throughput, load average and uptime — parsed entirely from `/proc` + `df`
 - Interactive SSH terminal (xterm.js) with a full PTY shell
@@ -14,29 +16,45 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
   editor, upload / download, mkdir / rename / delete, and a transfer log
 - **Global settings** (gear icon in the sidebar):
   - **Keychain (Bitwarden)** — store usernames, passwords and SSH keys in your
-    Bitwarden vault via the `bw` CLI so secrets sync end-to-end across devices.
-    When disabled, secrets stay on the device and are never written to the
-    sync file.
+    Bitwarden vault so secrets sync end-to-end across devices. Reached directly
+    over the Bitwarden REST API with a clean-room crypto implementation (no
+    `bw` CLI or official SDK). When disabled, secrets stay on the device and
+    are never written to the sync file.
   - **Snippets** — reusable shell commands, runnable in any terminal from the
     snippet menu.
   - **Auto-sync** — periodically export the server list and settings to a JSON
     file (secrets excluded), with manual *Sync now* / *Restore* actions.
+  - **AI control (MCP bridge)** — a loopback, token-protected endpoint that lets
+    the [`mcp/`](../mcp) server drive your *connected* servers (run commands,
+    status, SFTP). Login and secrets never leave the app; the bridge only acts
+    on connections you've authenticated.
 - Server definitions persisted locally (zustand `persist`)
 
-### Bitwarden keychain
+### Bitwarden keychain (clean-room)
 
-ServerCase drives the official [`bw`](https://bitwarden.com/help/cli/) CLI:
+ServerCase talks to the Bitwarden REST API directly and reimplements the
+account crypto in `electron/bitwarden.ts` — no `bw` CLI and no official SDK.
 
-1. Install `bw` and run `bw login` once in a terminal (login may require 2FA).
-2. Open **Settings → Keychain**, enable Bitwarden, and unlock with your master
-   password. The master password is exchanged for a session token held only in
-   the main process — it is never persisted.
-3. Each server maps to one vault item named `${prefix}${serverId}`; the full
-   credential bundle is stored in the item's notes (and mirrored into the login
-   fields for use from the regular Bitwarden apps).
+1. In the Bitwarden web vault, get your **personal API key** (Account Settings
+   → Security → Keys → *View API Key*) — a `client_id` / `client_secret`.
+2. Open **Settings → Keychain**, enable Bitwarden, fill in the server URL
+   (blank for the cloud), your account email, and the API key, then unlock with
+   your master password.
+3. Auth uses OAuth `client_credentials` (no 2FA prompt). The master password is
+   used only to derive the vault key locally (PBKDF2 **or Argon2id** → HKDF →
+   AES‑CBC‑256 + HMAC‑SHA256) and is never sent to the server or persisted.
+   Each server maps to one vault item named `${prefix}${serverId}`.
 
-Self-hosted users should point the CLI at their server first with
-`bw config server <url>`.
+Notes:
+- Both the **PBKDF2** and **Argon2id** KDFs are supported (Argon2id via the
+  MIT-licensed `@noble/hashes`, verified against the RFC 9106 test vector).
+- The KDF parameters and per-cipher keys follow the documented Bitwarden
+  security model — referenced from the protocol, not from any official client
+  code (which is GPL and license-incompatible with this BSD-3 project).
+- The API key `client_secret` is stored locally and is redacted from the sync
+  file.
+- **Test vault** (shown once unlocked) round-trips a throwaway item — encrypt,
+  upload, fetch, decrypt, verify, delete — to confirm the whole path works.
 
 ## Architecture
 

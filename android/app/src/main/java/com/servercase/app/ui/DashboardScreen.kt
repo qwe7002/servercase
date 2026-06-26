@@ -47,6 +47,7 @@ fun DashboardScreen(
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onOpenTerminal: () -> Unit,
+    onOpenFiles: () -> Unit,
     onStartPolling: () -> Unit,
     onStopPolling: () -> Unit,
     onBack: () -> Unit,
@@ -144,7 +145,8 @@ fun DashboardScreen(
                     }
 
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(onClick = onOpenTerminal, modifier = Modifier.weight(1f)) { Text("Open terminal") }
+                        OutlinedButton(onClick = onOpenTerminal, modifier = Modifier.weight(1f)) { Text("Terminal") }
+                        OutlinedButton(onClick = onOpenFiles, modifier = Modifier.weight(1f)) { Text("Files") }
                         Button(onClick = onDisconnect, modifier = Modifier.weight(1f)) { Text("Disconnect") }
                     }
                 }

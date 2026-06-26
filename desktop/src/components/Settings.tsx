@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { BitwardenStatus, Snippet } from '../../electron/shared';
+import type { BitwardenStatus, BridgeInfo, Snippet } from '../../electron/shared';
 import { useSettings } from '../store/settings';
 import { useServers } from '../store/servers';
 import { runExport, runImport } from '../lib/sync';
@@ -19,6 +19,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import {
+  Bot,
+  Copy,
   KeyRound,
   Lock,
   Plus,
@@ -29,7 +31,7 @@ import {
   Unlock,
 } from 'lucide-react';
 
-type Section = 'bitwarden' | 'snippets' | 'sync';
+type Section = 'bitwarden' | 'snippets' | 'sync' | 'bridge';
 
 interface Props {
   onDone: () => void;
@@ -48,10 +50,11 @@ export function Settings({ onDone }: Props) {
         </DialogHeader>
 
         <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="bitwarden">Keychain</TabsTrigger>
             <TabsTrigger value="snippets">Snippets</TabsTrigger>
             <TabsTrigger value="sync">Auto-sync</TabsTrigger>
+            <TabsTrigger value="bridge">AI</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -59,6 +62,7 @@ export function Settings({ onDone }: Props) {
           {section === 'bitwarden' && <BitwardenSection />}
           {section === 'snippets' && <SnippetsSection />}
           {section === 'sync' && <SyncSection />}
+          {section === 'bridge' && <BridgeSection />}
         </div>
       </DialogContent>
     </Dialog>
@@ -90,7 +94,7 @@ function BitwardenSection() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bw.cliPath, bw.serverUrl, bw.itemPrefix]);
+  }, [bw.serverUrl, bw.email, bw.clientId, bw.clientSecret, bw.itemPrefix]);
 
   const toggle = async (next: boolean) => {
     setMsg(null);
@@ -150,6 +154,19 @@ function BitwardenSection() {
     }
   };
 
+  const runTest = async () => {
+    if (!api) return;
+    setBusy(true);
+    setMsg('Testing vault…');
+    try {
+      setMsg(await api.bw.test());
+    } catch (e) {
+      setMsg(`Vault test failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const unlocked = status?.state === 'unlocked';
 
   return (
@@ -160,10 +177,12 @@ function BitwardenSection() {
             <ShieldCheck className="size-4" /> Store credentials in Bitwarden
           </Label>
           <p className="text-sm text-muted-foreground">
-            Usernames, passwords and SSH keys are kept in your Bitwarden vault
-            via the <code>bw</code> CLI and synced end-to-end across devices.
-            When off, secrets stay on this device only and are never written to
-            the sync file.
+            Usernames, passwords and SSH keys are kept in your Bitwarden vault,
+            reached directly over the Bitwarden API (no <code>bw</code> CLI) and
+            synced end-to-end. Authenticate with a personal API key; the master
+            password unlocks the vault locally and is never stored. When off,
+            secrets stay on this device only and are never written to the sync
+            file.
           </p>
         </div>
         <Switch checked={bw.enabled} onCheckedChange={toggle} />
@@ -173,15 +192,6 @@ function BitwardenSection() {
         <>
           <Separator />
           <div className="grid gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="bw-cli">`bw` CLI path (optional)</Label>
-              <Input
-                id="bw-cli"
-                placeholder="bw (resolved on PATH)"
-                value={bw.cliPath}
-                onChange={(e) => setBitwarden({ cliPath: e.target.value })}
-              />
-            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="bw-server">Server URL (self-hosted)</Label>
@@ -193,13 +203,43 @@ function BitwardenSection() {
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="bw-prefix">Item name prefix</Label>
+                <Label htmlFor="bw-email">Account email</Label>
                 <Input
-                  id="bw-prefix"
-                  value={bw.itemPrefix}
-                  onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+                  id="bw-email"
+                  type="email"
+                  placeholder="you@example.com"
+                  value={bw.email}
+                  onChange={(e) => setBitwarden({ email: e.target.value })}
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="bw-client-id">API key client_id</Label>
+                <Input
+                  id="bw-client-id"
+                  placeholder="user.xxxxxxxx-…"
+                  value={bw.clientId}
+                  onChange={(e) => setBitwarden({ clientId: e.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="bw-client-secret">API key client_secret</Label>
+                <Input
+                  id="bw-client-secret"
+                  type="password"
+                  value={bw.clientSecret}
+                  onChange={(e) => setBitwarden({ clientSecret: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="bw-prefix">Item name prefix</Label>
+              <Input
+                id="bw-prefix"
+                value={bw.itemPrefix}
+                onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+              />
             </div>
           </div>
 
@@ -211,16 +251,10 @@ function BitwardenSection() {
               <VaultBadge status={status} />
             </div>
 
-            {status && !status.available && (
-              <p className="text-sm text-destructive">
-                The <code>bw</code> CLI was not found. Install it and ensure it
-                is on your PATH (or set an explicit path above).
-              </p>
-            )}
-            {status?.available && status.state === 'unauthenticated' && (
+            {status?.available === false && (
               <p className="text-sm text-muted-foreground">
-                Not logged in. Run <code>bw login</code> in a terminal first
-                (Bitwarden login can require 2FA), then return here to unlock.
+                Enter your account email and a personal API key (Bitwarden web
+                vault → Account Settings → Security → Keys → View API Key).
               </p>
             )}
             {status?.available && status.state === 'locked' && (
@@ -242,6 +276,9 @@ function BitwardenSection() {
             )}
             {unlocked && (
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={runTest} disabled={busy}>
+                  <ShieldCheck /> Test vault
+                </Button>
                 <Button variant="outline" onClick={pushAll} disabled={busy}>
                   <KeyRound /> Push all secrets
                 </Button>
@@ -264,15 +301,14 @@ function BitwardenSection() {
 
 function VaultBadge({ status }: { status: BitwardenStatus | null }) {
   if (!status) return <Badge variant="secondary">checking…</Badge>;
-  if (!status.available) return <Badge variant="destructive">CLI missing</Badge>;
+  if (!status.available) return <Badge variant="outline">not configured</Badge>;
   if (status.state === 'unlocked')
     return (
       <Badge>
         unlocked{status.userEmail ? ` · ${status.userEmail}` : ''}
       </Badge>
     );
-  if (status.state === 'locked') return <Badge variant="secondary">locked</Badge>;
-  return <Badge variant="outline">logged out</Badge>;
+  return <Badge variant="secondary">locked</Badge>;
 }
 
 // ── Snippets ──────────────────────────────────────────────────────────────
@@ -510,6 +546,95 @@ function SyncSection() {
       </div>
 
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
+
+// ── AI control bridge (MCP) ────────────────────────────────────────────────
+
+function BridgeSection() {
+  const bridge = useSettings((s) => s.settings.bridge);
+  const setBridge = useSettings((s) => s.setBridge);
+  const [info, setInfo] = useState<BridgeInfo | null>(null);
+
+  const api = window.servercase;
+
+  useEffect(() => {
+    void (async () => {
+      if (api) setInfo(await api.bridge.info());
+    })();
+  }, [api, bridge.enabled, bridge.port]);
+
+  const copy = (value: string) => void navigator.clipboard?.writeText(value);
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <Bot className="size-4" /> Let an AI control SSH (MCP bridge)
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Exposes a local, token-protected endpoint so the ServerCase MCP
+            server can run commands, read status and browse files on connections
+            you have authenticated here. The bridge never sees your passwords,
+            keys or Bitwarden — login stays in ServerCase.
+          </p>
+        </div>
+        <Switch
+          checked={bridge.enabled}
+          onCheckedChange={(v) => setBridge({ enabled: v })}
+        />
+      </div>
+
+      {bridge.enabled && (
+        <>
+          <Separator />
+          <div className="grid w-40 gap-2">
+            <Label htmlFor="bridge-port">Port</Label>
+            <Input
+              id="bridge-port"
+              inputMode="numeric"
+              value={String(bridge.port)}
+              onChange={(e) =>
+                setBridge({ port: Number(e.target.value) || 8765 })
+              }
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Bridge URL</Label>
+            <div className="flex gap-2">
+              <Input readOnly value={info?.url ?? ''} className="font-mono text-xs" />
+              <Button variant="outline" onClick={() => copy(info?.url ?? '')}>
+                <Copy />
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Token</Label>
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                type="password"
+                value={info?.token ?? ''}
+                className="font-mono text-xs"
+              />
+              <Button variant="outline" onClick={() => copy(info?.token ?? '')}>
+                <Copy />
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Status: {info?.running ? 'listening' : 'stopped'}. Point the MCP
+            server at this URL and token (<code>SERVERCASE_MCP_URL</code> /{' '}
+            <code>SERVERCASE_MCP_TOKEN</code>). The token is regenerated each
+            time the app restarts.
+          </p>
+        </>
+      )}
     </div>
   );
 }

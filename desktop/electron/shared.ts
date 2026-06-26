@@ -11,6 +11,8 @@ export interface ServerConfig {
   port: number;
   username: string;
   authType: AuthType;
+  /** Id of the {@link Group} this server belongs to, if any. */
+  groupId?: string;
   /** Present when authType === 'password'. */
   password?: string;
   /** PEM private key text, present when authType === 'key'. */
@@ -37,6 +39,12 @@ export interface ServerStatus {
   /** Bytes/sec since previous sample, or null until a second sample. */
   netRxBytesPerSec: number | null;
   netTxBytesPerSec: number | null;
+  /** Local NIC addresses as "iface address" (scope-global only). */
+  ipv4: string[];
+  ipv6: string[];
+  /** Public addresses as seen from the internet, or null if unavailable. */
+  publicIpv4: string | null;
+  publicIpv6: string | null;
   uptimeSec: number;
   loadAvg: [number, number, number];
   hostname: string;
@@ -80,25 +88,71 @@ export interface AutoSyncSettings {
 export interface BitwardenSettings {
   /**
    * When enabled, server login credentials (username, password, private key,
-   * passphrase) are stored in the user's Bitwarden vault via the `bw` CLI
-   * rather than in the renderer's local storage. Bitwarden then becomes the
-   * authoritative, end-to-end-encrypted store that syncs secrets across
-   * devices. When disabled, secrets live only on this device and are never
-   * written to the sync file.
+   * passphrase) are stored in the user's Bitwarden vault — reached directly
+   * over the Bitwarden REST API with a clean-room crypto implementation (no
+   * `bw` CLI). Bitwarden then becomes the authoritative, end-to-end-encrypted
+   * store that syncs secrets across devices. When disabled, secrets live only
+   * on this device and are never written to the sync file.
    */
   enabled: boolean;
-  /** Absolute path to the `bw` CLI binary; empty means resolve `bw` on PATH. */
-  cliPath: string;
-  /** Self-hosted Bitwarden/Vaultwarden server URL; empty means bitwarden.com. */
+  /**
+   * Base URL of the Bitwarden server. Empty means the official cloud
+   * (identity.bitwarden.com / api.bitwarden.com). For self-hosted/Vaultwarden
+   * set the base URL; `/identity` and `/api` are appended.
+   */
   serverUrl: string;
+  /** Account email — used as the KDF salt and for prelogin. */
+  email: string;
+  /** Personal API key client_id ("user.<guid>"), from the Bitwarden web vault. */
+  clientId: string;
+  /** Personal API key client_secret. Sensitive; redacted from the sync file. */
+  clientSecret: string;
   /** Name prefix for vault items owned by ServerCase. */
   itemPrefix: string;
+}
+
+/**
+ * Local control bridge: a loopback HTTP endpoint that lets an external MCP
+ * server drive the SSH connections ServerCase has already authenticated. The
+ * bridge never exposes credentials or the Bitwarden vault — login stays in
+ * ServerCase.
+ */
+export interface BridgeSettings {
+  enabled: boolean;
+  /** Loopback port to listen on. */
+  port: number;
+}
+
+/** A named group/folder used to organize the server list. */
+export interface Group {
+  id: string;
+  name: string;
 }
 
 export interface GlobalSettings {
   bitwarden: BitwardenSettings;
   snippets: Snippet[];
   autoSync: AutoSyncSettings;
+  bridge: BridgeSettings;
+  groups: Group[];
+}
+
+/** Runtime status of the control bridge, surfaced to the Settings UI. */
+export interface BridgeInfo {
+  running: boolean;
+  port: number;
+  /** Bearer token the MCP server must present. Regenerated per session. */
+  token: string;
+  /** Convenience base URL, e.g. http://127.0.0.1:8765 */
+  url: string;
+  error?: string;
+}
+
+/** A server entry the renderer registers with the bridge (no secrets). */
+export interface BridgeServerEntry {
+  id: string;
+  name: string;
+  host: string;
 }
 
 /**
@@ -174,6 +228,7 @@ export const IpcChannels = {
   bwUnlock: 'sc:bw:unlock',
   bwLock: 'sc:bw:lock',
   bwSync: 'sc:bw:sync',
+  bwTest: 'sc:bw:test',
   bwSet: 'sc:bw:set',
   bwGet: 'sc:bw:get',
   bwList: 'sc:bw:list',
@@ -182,6 +237,11 @@ export const IpcChannels = {
   syncExport: 'sc:sync:export',
   syncImport: 'sc:sync:import',
   syncPickFile: 'sc:sync:pickFile',
+  // control bridge (for the MCP server)
+  bridgeInfo: 'sc:bridge:info',
+  bridgeSetEnabled: 'sc:bridge:setEnabled',
+  bridgeRegister: 'sc:bridge:register',
+  bridgeConnectRequest: 'sc:bridge:connectRequest',
   // sftp
   sftpList: 'sc:sftp:list',
   sftpReadText: 'sc:sftp:readText',

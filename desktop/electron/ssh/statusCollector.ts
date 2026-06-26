@@ -12,6 +12,7 @@ export const STATUS_COMMAND = [
   'echo "===uptime==="; cat /proc/uptime',
   'echo "===load==="; cat /proc/loadavg',
   'echo "===disk==="; df -k -P 2>/dev/null',
+  'echo "===ip==="; ip -o addr show scope global 2>/dev/null',
   'echo "===host==="; uname -r; hostname',
 ].join('; ');
 
@@ -132,6 +133,28 @@ function parseDisk(raw: string): DiskUsage[] {
   return out;
 }
 
+function parseIp(raw: string): { ipv4: string[]; ipv6: string[] } {
+  const ipv4: string[] = [];
+  const ipv6: string[] = [];
+  for (const line of section(raw, 'ip').split('\n')) {
+    // "2: eth0    inet 10.0.0.5/24 brd ... scope global eth0 ..."
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 4) continue;
+    const iface = parts[1];
+    if (
+      iface === 'lo' ||
+      iface.startsWith('docker') ||
+      iface.startsWith('veth') ||
+      iface.startsWith('br-')
+    )
+      continue;
+    const address = parts[3].split('/')[0];
+    if (parts[2] === 'inet') ipv4.push(`${iface} ${address}`);
+    else if (parts[2] === 'inet6') ipv6.push(`${iface} ${address}`);
+  }
+  return { ipv4, ipv6 };
+}
+
 function parseHost(raw: string): { kernel: string; hostname: string } {
   const lines = section(raw, 'host').trim().split('\n');
   return { kernel: (lines[0] ?? '').trim(), hostname: (lines[1] ?? '').trim() };
@@ -169,12 +192,17 @@ export function parseStatus(raw: string, state: CollectorState): ServerStatus {
   state.net = { ...netSample, at: now };
 
   const host = parseHost(raw);
+  const ip = parseIp(raw);
   return {
     cpuUsage,
     ...mem,
     disks: parseDisk(raw),
     netRxBytesPerSec: netRx,
     netTxBytesPerSec: netTx,
+    ipv4: ip.ipv4,
+    ipv6: ip.ipv6,
+    publicIpv4: null,
+    publicIpv6: null,
     uptimeSec: parseUptime(raw),
     loadAvg: parseLoad(raw),
     hostname: host.hostname,

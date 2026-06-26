@@ -11,7 +11,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,15 +34,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.servercase.app.data.AuthType
 import com.servercase.app.data.ServerConfig
+import com.servercase.app.data.ServerGroup
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerFormScreen(
     existing: ServerConfig?,
+    groups: List<ServerGroup>,
     onSave: (ServerConfig) -> Unit,
     onBack: () -> Unit,
 ) {
     var name by remember { mutableStateOf(existing?.name ?: "") }
+    var groupId by remember { mutableStateOf(existing?.groupId ?: "") }
+    var groupExpanded by remember { mutableStateOf(false) }
     var host by remember { mutableStateOf(existing?.host ?: "") }
     var port by remember { mutableStateOf((existing?.port ?: 22).toString()) }
     var username by remember { mutableStateOf(existing?.username ?: "root") }
@@ -67,6 +74,34 @@ fun ServerFormScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+            ExposedDropdownMenuBox(
+                expanded = groupExpanded,
+                onExpandedChange = { groupExpanded = it },
+            ) {
+                OutlinedTextField(
+                    value = groups.find { it.id == groupId }?.name ?: "No group",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Group") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = groupExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                )
+                androidx.compose.material3.ExposedDropdownMenu(
+                    expanded = groupExpanded,
+                    onDismissRequest = { groupExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("No group") },
+                        onClick = { groupId = ""; groupExpanded = false },
+                    )
+                    groups.forEach { g ->
+                        DropdownMenuItem(
+                            text = { Text(g.name) },
+                            onClick = { groupId = g.id; groupExpanded = false },
+                        )
+                    }
+                }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(host, { host = it }, label = { Text("Host") }, modifier = Modifier.weight(3f))
                 OutlinedTextField(
@@ -121,6 +156,7 @@ fun ServerFormScreen(
                             host = host.trim(),
                             port = port.toIntOrNull() ?: 22,
                             username = username.trim(),
+                            groupId = groupId.ifBlank { null },
                             authType = authType,
                             password = if (authType == AuthType.PASSWORD) password else null,
                             privateKey = if (authType == AuthType.KEY) privateKey else null,

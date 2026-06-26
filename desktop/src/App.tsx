@@ -3,14 +3,17 @@ import type { ServerConfig } from '../electron/shared';
 import { useServers } from './store/servers';
 import { useConnections } from './useConnections';
 import { useGlobalSettings } from './useGlobalSettings';
+import { useBridge } from './useBridge';
 import { ServerList } from './components/ServerList';
 import { ServerForm } from './components/ServerForm';
 import { Dashboard } from './components/Dashboard';
 import { Settings } from './components/Settings';
+import { GroupsDialog } from './components/GroupsDialog';
 
 export function App() {
   useConnections();
   useGlobalSettings();
+  useBridge();
   const servers = useServers((s) => s.servers);
   const selectedId = useServers((s) => s.selectedId);
   const selected = servers.find((s) => s.id === selectedId);
@@ -18,6 +21,7 @@ export function App() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ServerConfig | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
 
   const openAdd = () => {
     setEditing(undefined);
@@ -34,6 +38,7 @@ export function App() {
         onAdd={openAdd}
         onEdit={openEdit}
         onOpenSettings={() => setSettingsOpen(true)}
+        onManageGroups={() => setGroupsOpen(true)}
       />
       {selected ? (
         <Dashboard key={selected.id} server={selected} />
@@ -48,6 +53,7 @@ export function App() {
         <ServerForm existing={editing} onDone={() => setFormOpen(false)} />
       )}
       {settingsOpen && <Settings onDone={() => setSettingsOpen(false)} />}
+      {groupsOpen && <GroupsDialog onDone={() => setGroupsOpen(false)} />}
     </div>
   );
 }

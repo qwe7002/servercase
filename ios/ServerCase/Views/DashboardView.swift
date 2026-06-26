@@ -4,11 +4,55 @@ struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
     let server: ServerConfig
 
+    @State private var selectedTab: ServerDetailTab = .overview
+
     private var state: ConnectionState { model.state(server.id) }
     private var status: ServerStatus? { model.status[server.id] }
     private var connected: Bool { state == .connected }
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("Section", selection: $selectedTab) {
+                ForEach(ServerDetailTab.allCases) { tab in
+                    Label(tab.title, systemImage: tab.systemImage).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color(.systemBackground))
+
+            Divider()
+
+            content
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { model.startPolling(server.id) }
+        .onDisappear { model.stopPolling() }
+    }
+
+    private var title: String {
+        switch selectedTab {
+        case .overview: return server.name
+        case .terminal: return "Terminal"
+        case .files: return "Files"
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selectedTab {
+        case .overview:
+            overview
+        case .terminal:
+            TerminalView(server: server)
+        case .files:
+            FilesView(server: server)
+        }
+    }
+
+    private var overview: some View {
         ScrollView {
             VStack(spacing: 16) {
                 if case let .error(message) = state {
@@ -21,41 +65,18 @@ struct DashboardView: View {
 
                 if !connected {
                     placeholder(state == .connecting ? "Establishing SSH connection…"
-                                                       : "Not connected. Tap Connect for live status.")
+                                                       : "Not connected. Go back and tap the server to connect.")
                 } else if let status {
                     gauges(status)
                     infoCard(status)
                     memoryCard(status)
                     disksCard(status)
-                    NavigationLink {
-                        TerminalView(server: server)
-                    } label: {
-                        Label("Open terminal", systemImage: "terminal")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
                 } else {
                     placeholder("Collecting status…")
                 }
             }
             .padding()
         }
-        .navigationTitle(server.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if connected {
-                    Button("Disconnect") { model.disconnect(server.id) }
-                } else {
-                    Button(state == .connecting ? "Connecting…" : "Connect") {
-                        model.connect(server)
-                    }
-                    .disabled(state == .connecting)
-                }
-            }
-        }
-        .onAppear { model.startPolling(server.id) }
-        .onDisappear { model.stopPolling() }
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -117,6 +138,30 @@ struct DashboardView: View {
             Text(label).foregroundStyle(.secondary)
             Spacer()
             Text(value).fontWeight(.medium)
+        }
+    }
+}
+
+private enum ServerDetailTab: CaseIterable, Identifiable {
+    case overview
+    case terminal
+    case files
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .overview: return "Overview"
+        case .terminal: return "Terminal"
+        case .files: return "Files"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview: return "gauge.with.dots.needle.33percent"
+        case .terminal: return "terminal"
+        case .files: return "folder"
         }
     }
 }

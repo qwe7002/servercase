@@ -1,0 +1,26 @@
+{
+  "name": "servercase-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that lets an AI manage Linux servers over SSH (ServerCase)",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "bin": {
+    "servercase-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3"
+  }
+}

@@ -3,6 +3,8 @@ import {
   IpcChannels,
   type BitwardenSettings,
   type BitwardenStatus,
+  type BridgeInfo,
+  type BridgeServerEntry,
   type ConnectionEvent,
   type ServerConfig,
   type ServerSecrets,
@@ -49,6 +51,7 @@ const api = {
       ipcRenderer.invoke(IpcChannels.bwUnlock, masterPassword),
     lock: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwLock),
     sync: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwSync),
+    test: (): Promise<string> => ipcRenderer.invoke(IpcChannels.bwTest),
     set: (serverId: string, secrets: ServerSecrets): Promise<void> =>
       ipcRenderer.invoke(IpcChannels.bwSet, serverId, secrets),
     get: (serverId: string): Promise<ServerSecrets | null> =>
@@ -67,6 +70,20 @@ const api = {
       ipcRenderer.invoke(IpcChannels.syncExport, filePath, payload),
     import: (filePath: string): Promise<SyncPayload> =>
       ipcRenderer.invoke(IpcChannels.syncImport, filePath),
+  },
+
+  // Control bridge (MCP)
+  bridge: {
+    info: (): Promise<BridgeInfo> => ipcRenderer.invoke(IpcChannels.bridgeInfo),
+    setEnabled: (enabled: boolean, port: number): Promise<BridgeInfo> =>
+      ipcRenderer.invoke(IpcChannels.bridgeSetEnabled, enabled, port),
+    register: (entries: BridgeServerEntry[]): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bridgeRegister, entries),
+    onConnectRequest: (cb: (serverId: string) => void): (() => void) => {
+      const handler = (_e: unknown, serverId: string) => cb(serverId);
+      ipcRenderer.on(IpcChannels.bridgeConnectRequest, handler);
+      return () => ipcRenderer.off(IpcChannels.bridgeConnectRequest, handler);
+    },
   },
 
   // SFTP file management

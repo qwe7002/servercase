@@ -14,6 +14,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.servercase.app.data.Snippet
 import com.servercase.app.data.ssh.SshClient
 import kotlinx.coroutines.flow.Flow
 
@@ -41,9 +45,10 @@ private val ANSI = Regex("\\[[0-9;?]*[ -/]*[@-~]")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TerminalScreen(client: SshClient?, onBack: () -> Unit) {
+fun TerminalScreen(client: SshClient?, snippets: List<Snippet> = emptyList(), onBack: () -> Unit) {
     var output by remember { mutableStateOf("") }
     var input by remember { mutableStateOf("") }
+    var snippetMenu by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
 
     var handle by remember { mutableStateOf<SshClient.ShellHandle?>(null) }
@@ -74,6 +79,24 @@ fun TerminalScreen(client: SshClient?, onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (snippets.isNotEmpty()) {
+                        IconButton(onClick = { snippetMenu = true }) {
+                            Icon(Icons.Default.Code, contentDescription = "Snippets")
+                        }
+                        DropdownMenu(expanded = snippetMenu, onDismissRequest = { snippetMenu = false }) {
+                            snippets.forEach { snippet ->
+                                DropdownMenuItem(
+                                    text = { Text(snippet.name) },
+                                    onClick = {
+                                        snippetMenu = false
+                                        handle?.write(snippet.command + "\n")
+                                    },
+                                )
+                            }
+                        }
                     }
                 },
             )

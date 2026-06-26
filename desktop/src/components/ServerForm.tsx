@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AuthType, ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
+import { useSettings } from '../store/settings';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,8 +25,10 @@ interface Props {
 export function ServerForm({ existing, onDone }: Props) {
   const addServer = useServers((s) => s.addServer);
   const updateServer = useServers((s) => s.updateServer);
+  const groups = useSettings((s) => s.settings.groups);
 
   const [name, setName] = useState(existing?.name ?? '');
+  const [groupId, setGroupId] = useState(existing?.groupId ?? '');
   const [host, setHost] = useState(existing?.host ?? '');
   const [port, setPort] = useState(String(existing?.port ?? 22));
   const [username, setUsername] = useState(existing?.username ?? 'root');
@@ -46,6 +49,7 @@ export function ServerForm({ existing, onDone }: Props) {
       host: host.trim(),
       port: Number(port) || 22,
       username: username.trim(),
+      groupId: groupId || undefined,
       authType,
       password: authType === 'password' ? password : undefined,
       privateKey: authType === 'key' ? privateKey : undefined,
@@ -71,14 +75,32 @@ export function ServerForm({ existing, onDone }: Props) {
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="server-name">Name</Label>
-              <Input
-                id="server-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="server-name">Name</Label>
+                <Input
+                  id="server-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="server-group">Group</Label>
+                <select
+                  id="server-group"
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">No group</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="grid grid-cols-[1fr_7rem] gap-3">

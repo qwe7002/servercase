@@ -1,16 +1,11 @@
 import { useState } from 'react';
 import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
-import {
-  formatKb,
-  formatRate,
-  formatUptime,
-  percent,
-} from '../format';
+import { formatKb, formatUptime, percent } from '../format';
 import { Gauge, UsageBar } from './StatusCard';
 import { Terminal } from './Terminal';
 import { Sftp } from './Sftp';
-import { useSettings } from '../store/settings';
+import { connectServer } from '../lib/connect';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,7 +15,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertCircle, Network, ServerIcon, Timer } from 'lucide-react';
+import { AlertCircle, ServerIcon, Timer } from 'lucide-react';
 
 interface Props {
   server: ServerConfig;
@@ -33,26 +28,15 @@ export function Dashboard({ server }: Props) {
   const status = useServers((s) => s.status[server.id]);
   const lastError = useServers((s) => s.lastError[server.id]);
   const setConnState = useServers((s) => s.setConnState);
-  const vaultEnabled = useSettings((s) => s.settings.bitwarden.enabled);
   const [tab, setTab] = useState<Tab>('overview');
   const [busy, setBusy] = useState(false);
 
   const connect = async () => {
-    const api = window.servercase;
-    if (!api) return;
     setBusy(true);
-    setConnState(server.id, 'connecting');
     try {
-      // With the Bitwarden vault, secrets live there rather than on the
-      // server object; fetch them on demand if they are missing.
-      let cfg = server;
-      if (vaultEnabled && !server.password && !server.privateKey) {
-        const secrets = await api.bw.get(server.id);
-        if (secrets) cfg = { ...server, ...secrets };
-      }
-      await api.connect(cfg);
-    } catch (e) {
-      setConnState(server.id, 'error', (e as Error).message);
+      await connectServer(server);
+    } catch {
+      // Error state is already set by connectServer.
     } finally {
       setBusy(false);
     }
@@ -144,16 +128,6 @@ export function Dashboard({ server }: Props) {
               <CardContent className="grid h-full grid-cols-2 gap-5 p-5">
                 <Metric icon={Timer} label="Uptime" value={formatUptime(status.uptimeSec)} />
                 <Metric
-                  icon={Network}
-                  label="Net ↓"
-                  value={formatRate(status.netRxBytesPerSec)}
-                />
-                <Metric
-                  icon={Network}
-                  label="Net ↑"
-                  value={formatRate(status.netTxBytesPerSec)}
-                />
-                <Metric
                   icon={ServerIcon}
                   label="Host"
                   value={status.hostname || '–'}
@@ -208,9 +182,44 @@ export function Dashboard({ server }: Props) {
               ))}
             </CardContent>
           </Card>
+
+          <Card className="col-span-2">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-base">Network</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
+              <IpBlock label="NIC IPv4" items={status.ipv4} />
+              <IpBlock label="NIC IPv6" items={status.ipv6} />
+              <IpBlock
+                label="External IPv4"
+                items={status.publicIpv4 ? [status.publicIpv4] : []}
+              />
+              <IpBlock
+                label="External IPv6"
+                items={status.publicIpv6 ? [status.publicIpv6] : []}
+              />
+            </CardContent>
+          </Card>
         </div>
       )}
     </main>
+  );
+}
+
+function IpBlock({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-xs text-muted-foreground">{label}</div>
+      {items.length === 0 ? (
+        <div className="text-muted-foreground">–</div>
+      ) : (
+        items.map((value) => (
+          <div key={value} className="truncate font-mono text-xs" title={value}>
+            {value}
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 
