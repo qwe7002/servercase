@@ -15,6 +15,8 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import org.bouncycastle.crypto.generators.Argon2BytesGenerator
+import org.bouncycastle.crypto.params.Argon2Parameters
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -95,8 +97,8 @@ class BitwardenVault {
 
     suspend fun unlock(masterPassword: String): BitwardenStatus = withContext(Dispatchers.IO) {
         require(configured) { "Bitwarden API key is not configured" }
-        val kdf = prelogin()
         val token = requestToken()
+        val kdf = token.kdf ?: prelogin()
 
         val masterKey = deriveMasterKey(masterPassword, kdf)
         val stretchedEnc = hkdfExpand(masterKey, "enc", 32)
@@ -127,7 +129,8 @@ class BitwardenVault {
     suspend fun listSecrets(): Map<String, ServerSecrets> = withContext(Dispatchers.IO) {
         val out = HashMap<String, ServerSecrets>()
         for (cipher in fetchCiphers()) {
-            val name = decryptField(cipher.name)
+            val (enc, mac) = cipherKeys(cipher)
+            val name = decryptStr(cipher.name, enc, mac)
             if (name != null && name.startsWith(settings.itemPrefix)) {
                 out[name.removePrefix(settings.itemPrefix)] = decodeSecrets(cipher)
             }
@@ -162,25 +165,62 @@ class BitwardenVault {
     // --- crypto -----------------------------------------------------------
 
     private fun deriveMasterKey(password: String, kdf: KdfInfo): ByteArray {
-        require(kdf.type == 0) { "Only the PBKDF2 KDF is supported; switch your account KDF to PBKDF2." }
-        val salt = settings.email.trim().lowercase()
-        val spec = PBEKeySpec(password.toCharArray(), salt.toByteArray(Charsets.UTF_8), kdf.iterations, 256)
-        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        val email = settings.email.trim().lowercase()
+        return when (kdf.type) {
+            0 -> {
+                val spec = PBEKeySpec(password.toCharArray(), email.toByteArray(Charsets.UTF_8), kdf.iterations, 256)
+                SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+            }
+            1 -> {
+                // Bitwarden Argon2id: salt = SHA-256(email), memory in MiB → KiB.
+                val salt = MessageDigest.getInstance("SHA-256").digest(email.toByteArray(Charsets.UTF_8))
+                argon2id(password.toByteArray(Charsets.UTF_8), salt, kdf.iterations, kdf.memory * 1024, kdf.parallelism)
+            }
+            else -> error("unsupported KDF type ${kdf.type}")
+        }
+    }
+
+    private fun argon2id(password: ByteArray, salt: ByteArray, iterations: Int, memoryKiB: Int, parallelism: Int): ByteArray {
+        val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_id)
+            .withVersion(Argon2Parameters.ARGON2_VERSION_13)
+            .withIterations(iterations)
+            .withMemoryAsKB(memoryKiB)
+            .withParallelism(parallelism)
+            .withSalt(salt)
+            .build()
+        val generator = Argon2BytesGenerator().apply { init(params) }
+        val out = ByteArray(32)
+        generator.generateBytes(password, out)
+        return out
     }
 
     private fun encryptField(plaintext: String): String =
         encryptEncString(plaintext.toByteArray(Charsets.UTF_8), encKey(), macKey())
 
-    private fun decryptField(enc: String?): String? {
+    private fun decryptStr(enc: String?, encKey: ByteArray, macKey: ByteArray): String? {
         if (enc == null) return null
-        return runCatching { String(decryptEncString(enc, encKey(), macKey()), Charsets.UTF_8) }.getOrNull()
+        return runCatching { String(decryptEncString(enc, encKey, macKey), Charsets.UTF_8) }.getOrNull()
+    }
+
+    /** The keys to use for a cipher's fields: its own key, or the user key. */
+    private fun cipherKeys(cipher: Cipher2): Pair<ByteArray, ByteArray> {
+        cipher.key?.let { k ->
+            runCatching { decryptEncString(k, encKey(), macKey()) }.getOrNull()?.let { raw ->
+                if (raw.size >= 64) return raw.copyOfRange(0, 32) to raw.copyOfRange(32, 64)
+            }
+        }
+        return encKey() to macKey()
     }
 
     private fun decodeSecrets(cipher: Cipher2): ServerSecrets {
-        decryptField(cipher.notes)?.let { notes ->
+        val (enc, mac) = cipherKeys(cipher)
+        decryptStr(cipher.notes, enc, mac)?.let { notes ->
             runCatching { json.decodeFromString<ServerSecrets>(notes) }.getOrNull()?.let { return it }
         }
-        return ServerSecrets(username = decryptField(cipher.username), password = decryptField(cipher.password))
+        return ServerSecrets(
+            username = decryptStr(cipher.username, enc, mac),
+            password = decryptStr(cipher.password, enc, mac),
+        )
     }
 
     private fun encKey() = userEncKey ?: error("Bitwarden vault is locked")
@@ -193,14 +233,19 @@ class BitwardenVault {
             val body = buildJsonObject { put("email", settings.email) }.toString()
             val (code, text) = http("POST", "$identityUrl/accounts/prelogin", body.toByteArray(),
                 "application/json", false)
-            if (code !in 200..299) return@runCatching KdfInfo(0, 600000)
-            val obj = Json.parseToJsonElement(text).jsonObject
-            KdfInfo(
-                type = pick(obj, "Kdf", "kdf")?.jsonPrimitive?.intOrNull ?: 0,
-                iterations = pick(obj, "KdfIterations", "kdfIterations")?.jsonPrimitive?.intOrNull ?: 600000,
-            )
-        }.getOrDefault(KdfInfo(0, 600000))
+            if (code !in 200..299) return@runCatching defaultKdf
+            parseKdf(Json.parseToJsonElement(text).jsonObject)
+        }.getOrDefault(defaultKdf)
     }
+
+    private val defaultKdf get() = KdfInfo(0, 600000, 64, 4)
+
+    private fun parseKdf(obj: JsonObject): KdfInfo = KdfInfo(
+        type = pick(obj, "Kdf", "kdf")?.jsonPrimitive?.intOrNull ?: 0,
+        iterations = pick(obj, "KdfIterations", "kdfIterations")?.jsonPrimitive?.intOrNull ?: 600000,
+        memory = pick(obj, "KdfMemory", "kdfMemory")?.jsonPrimitive?.intOrNull ?: 64,
+        parallelism = pick(obj, "KdfParallelism", "kdfParallelism")?.jsonPrimitive?.intOrNull ?: 4,
+    )
 
     private fun requestToken(): TokenResult {
         val form = listOf(
@@ -227,6 +272,7 @@ class BitwardenVault {
             accessToken = obj["access_token"]?.jsonPrimitive?.contentOrNull ?: "",
             expiresInSec = obj["expires_in"]?.jsonPrimitive?.intOrNull ?: 3600,
             key = key,
+            kdf = if (pick(obj, "Kdf", "kdf") != null) parseKdf(obj) else null,
         )
     }
 
@@ -240,7 +286,10 @@ class BitwardenVault {
 
     private fun findCipher(serverId: String): Cipher2? {
         val target = settings.itemPrefix + serverId
-        return fetchCiphers().firstOrNull { decryptField(it.name) == target }
+        return fetchCiphers().firstOrNull {
+            val (enc, mac) = cipherKeys(it)
+            decryptStr(it.name, enc, mac) == target
+        }
     }
 
     private fun api(method: String, path: String, body: String?): String {
@@ -332,13 +381,14 @@ class BitwardenVault {
     private fun b64(b: ByteArray) = Base64.getEncoder().encodeToString(b)
     private fun b64d(s: String): ByteArray = Base64.getDecoder().decode(s)
 
-    private data class KdfInfo(val type: Int, val iterations: Int)
-    private data class TokenResult(val accessToken: String, val expiresInSec: Int, val key: String)
+    private data class KdfInfo(val type: Int, val iterations: Int, val memory: Int, val parallelism: Int)
+    private data class TokenResult(val accessToken: String, val expiresInSec: Int, val key: String, val kdf: KdfInfo?)
 
     private class Cipher2(raw: JsonObject) {
         val id: String
         val name: String?
         val notes: String?
+        val key: String?
         val username: String?
         val password: String?
 
@@ -350,6 +400,7 @@ class BitwardenVault {
             id = pick(raw, "Id", "id") ?: ""
             name = pick(raw, "Name", "name")
             notes = pick(raw, "Notes", "notes")
+            key = pick(raw, "Key", "key")
             val login = (raw["Login"] ?: raw["login"]) as? JsonObject
             username = login?.let { pick(it, "Username", "username") }
             password = login?.let { pick(it, "Password", "password") }

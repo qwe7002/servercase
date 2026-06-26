@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { argon2id } from '@noble/hashes/argon2';
 import type {
   BitwardenSettings,
   BitwardenStatus,
@@ -8,20 +9,20 @@ import type {
 /**
  * A clean-room Bitwarden client: it speaks the Bitwarden REST API directly and
  * reimplements the account crypto, so it needs neither the `bw` CLI nor the
- * official SDK.
+ * official SDK. The protocol is the public, documented Bitwarden security
+ * model; none of the official (GPL) client code is used here.
  *
  * Auth uses a personal API key (OAuth `client_credentials`), which avoids the
  * interactive 2FA flow; the master password is still required to derive the
  * vault key locally and is never sent to the server or persisted.
  *
- * Crypto (matching the Bitwarden spec):
- *  - master key   = PBKDF2-SHA256(masterPassword, email, iterations, 32 bytes)
- *  - stretch      = HKDF-Expand(masterKey, "enc"|"mac") → encKey/macKey
- *  - user key     = decrypt(protectedKey) → 64 bytes (encKey64 ‖ macKey64)
- *  - EncString    = "2.<iv>|<ct>|<mac>" = AES-256-CBC + HMAC-SHA256, base64
- *
- * Note: only the PBKDF2 KDF is supported. Argon2id accounts must switch their
- * account KDF to PBKDF2 (Bitwarden web vault → Security → Keys).
+ * Crypto:
+ *  - master key  = PBKDF2-SHA256(password, email, iters)         [Kdf 0]
+ *                  or Argon2id(password, SHA256(email), m,t,p)   [Kdf 1]
+ *  - stretch     = HKDF-Expand(masterKey, "enc"|"mac") → enc/mac
+ *  - user key    = decrypt(protectedKey) → 64 bytes (encKey ‖ macKey)
+ *  - cipher key  = decrypt(cipher.key) with the user key, when present
+ *  - EncString   = "2.<iv>|<ct>|<mac>" = AES-256-CBC + HMAC-SHA256, base64
  */
 export class BitwardenVault {
   private settings: BitwardenSettings = {
@@ -41,7 +42,6 @@ export class BitwardenVault {
   private readonly deviceId = crypto.randomUUID();
 
   configure(settings: BitwardenSettings): void {
-    // Re-configuring with different credentials invalidates the session.
     if (
       settings.serverUrl !== this.settings.serverUrl ||
       settings.email !== this.settings.email ||
@@ -64,9 +64,7 @@ export class BitwardenVault {
 
   private get configured(): boolean {
     return Boolean(
-      this.settings.email &&
-        this.settings.clientId &&
-        this.settings.clientSecret,
+      this.settings.email && this.settings.clientId && this.settings.clientSecret,
     );
   }
 
@@ -93,8 +91,9 @@ export class BitwardenVault {
   async unlock(masterPassword: string): Promise<BitwardenStatus> {
     if (!this.configured) throw new Error('Bitwarden API key not configured');
 
-    const kdf = await this.prelogin();
     const token = await this.requestToken();
+    // KDF params come with the token; prelogin is only a fallback.
+    const kdf = token.kdf ?? (await this.prelogin());
 
     const masterKey = this.deriveMasterKey(masterPassword, kdf);
     const stretchedEnc = hkdfExpand(masterKey, 'enc', 32);
@@ -117,7 +116,6 @@ export class BitwardenVault {
     this.userMacKey = null;
   }
 
-  /** No-op kept for API parity with the previous CLI-backed vault. */
   async sync(): Promise<void> {
     this.assertUnlocked();
   }
@@ -131,7 +129,8 @@ export class BitwardenVault {
     const ciphers = await this.fetchCiphers();
     const out: Record<string, ServerSecrets> = {};
     for (const cipher of ciphers) {
-      const name = this.decryptField(cipher.name);
+      const keys = this.cipherKeys(cipher);
+      const name = decryptField(cipher.name, keys.enc, keys.mac);
       if (name && name.startsWith(this.settings.itemPrefix)) {
         out[name.slice(this.settings.itemPrefix.length)] =
           this.decodeSecrets(cipher);
@@ -142,8 +141,10 @@ export class BitwardenVault {
 
   async setSecrets(serverId: string, secrets: ServerSecrets): Promise<void> {
     this.assertUnlocked();
-    const name = this.encryptField(this.settings.itemPrefix + serverId);
-    const notes = this.encryptField(JSON.stringify(secrets));
+    const enc = this.userEncKey!;
+    const mac = this.userMacKey!;
+    const name = encryptEncString(this.settings.itemPrefix + serverId, enc, mac);
+    const notes = encryptEncString(JSON.stringify(secrets), enc, mac);
     const body = {
       type: 1,
       name,
@@ -152,8 +153,12 @@ export class BitwardenVault {
       folderId: null,
       organizationId: null,
       login: {
-        username: secrets.username ? this.encryptField(secrets.username) : null,
-        password: secrets.password ? this.encryptField(secrets.password) : null,
+        username: secrets.username
+          ? encryptEncString(secrets.username, enc, mac)
+          : null,
+        password: secrets.password
+          ? encryptEncString(secrets.password, enc, mac)
+          : null,
         uris: null,
         totp: null,
       },
@@ -174,36 +179,44 @@ export class BitwardenVault {
   // ── crypto ────────────────────────────────────────────────────────────────
 
   private deriveMasterKey(password: string, kdf: KdfInfo): Buffer {
-    if (kdf.type !== 0) {
-      throw new Error(
-        'Only the PBKDF2 KDF is supported; switch your Bitwarden account KDF to PBKDF2.',
+    const email = this.settings.email.trim().toLowerCase();
+    if (kdf.type === 0) {
+      return crypto.pbkdf2Sync(
+        Buffer.from(password, 'utf8'),
+        Buffer.from(email, 'utf8'),
+        kdf.iterations,
+        32,
+        'sha256',
       );
     }
-    const salt = this.settings.email.trim().toLowerCase();
-    return crypto.pbkdf2Sync(
-      Buffer.from(password, 'utf8'),
-      Buffer.from(salt, 'utf8'),
-      kdf.iterations,
-      32,
-      'sha256',
-    );
-  }
-
-  private encryptField(plaintext: string): string {
-    return encryptEncString(plaintext, this.encKey, this.macKey);
-  }
-
-  private decryptField(enc: string | null | undefined): string | null {
-    if (!enc) return null;
-    try {
-      return decryptEncString(enc, this.encKey, this.macKey).toString('utf8');
-    } catch {
-      return null;
+    if (kdf.type === 1) {
+      // Bitwarden Argon2id: salt = SHA-256(email), memory in MiB → KiB.
+      const salt = crypto.createHash('sha256').update(email, 'utf8').digest();
+      const out = argon2id(Buffer.from(password, 'utf8'), salt, {
+        t: kdf.iterations,
+        m: kdf.memory * 1024,
+        p: kdf.parallelism,
+        dkLen: 32,
+      });
+      return Buffer.from(out);
     }
+    throw new Error(`unsupported KDF type ${kdf.type}`);
+  }
+
+  /** The keys to use for a cipher's fields: its own key, or the user key. */
+  private cipherKeys(cipher: Cipher): { enc: Buffer; mac: Buffer } {
+    if (cipher.key) {
+      const raw = tryDecrypt(cipher.key, this.encKey, this.macKey);
+      if (raw && raw.length >= 64) {
+        return { enc: raw.subarray(0, 32), mac: raw.subarray(32, 64) };
+      }
+    }
+    return { enc: this.encKey, mac: this.macKey };
   }
 
   private decodeSecrets(cipher: Cipher): ServerSecrets {
-    const notes = this.decryptField(cipher.notes);
+    const keys = this.cipherKeys(cipher);
+    const notes = decryptField(cipher.notes, keys.enc, keys.mac);
     if (notes) {
       try {
         return JSON.parse(notes) as ServerSecrets;
@@ -212,8 +225,8 @@ export class BitwardenVault {
       }
     }
     return {
-      username: this.decryptField(cipher.login?.username) ?? undefined,
-      password: this.decryptField(cipher.login?.password) ?? undefined,
+      username: decryptField(cipher.login?.username, keys.enc, keys.mac) ?? undefined,
+      password: decryptField(cipher.login?.password, keys.enc, keys.mac) ?? undefined,
     };
   }
 
@@ -240,17 +253,11 @@ export class BitwardenVault {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: this.settings.email }),
       });
-      if (res.ok) {
-        const j = (await res.json()) as Record<string, unknown>;
-        return {
-          type: Number(pick(j, 'Kdf', 'kdf') ?? 0),
-          iterations: Number(pick(j, 'KdfIterations', 'kdfIterations') ?? 600000),
-        };
-      }
+      if (res.ok) return parseKdf(await res.json());
     } catch {
       /* fall back to defaults below */
     }
-    return { type: 0, iterations: 600000 };
+    return { type: 0, iterations: 600000, memory: 64, parallelism: 4 };
   }
 
   private async requestToken(): Promise<TokenResult> {
@@ -284,6 +291,7 @@ export class BitwardenVault {
       accessToken: String(json.access_token),
       expiresInSec: Number(json.expires_in ?? 3600),
       key,
+      kdf: pick(json, 'Kdf', 'kdf') !== undefined ? parseKdf(json) : null,
     };
   }
 
@@ -300,9 +308,11 @@ export class BitwardenVault {
   private async findCipher(serverId: string): Promise<Cipher | null> {
     const target = this.settings.itemPrefix + serverId;
     const ciphers = await this.fetchCiphers();
-    return (
-      ciphers.find((c) => this.decryptField(c.name) === target) ?? null
-    );
+    for (const cipher of ciphers) {
+      const keys = this.cipherKeys(cipher);
+      if (decryptField(cipher.name, keys.enc, keys.mac) === target) return cipher;
+    }
+    return null;
   }
 
   private async api(
@@ -330,12 +340,15 @@ export class BitwardenVault {
 interface KdfInfo {
   type: number;
   iterations: number;
+  memory: number;
+  parallelism: number;
 }
 
 interface TokenResult {
   accessToken: string;
   expiresInSec: number;
   key: string;
+  kdf: KdfInfo | null;
 }
 
 interface CipherLogin {
@@ -347,10 +360,21 @@ interface Cipher {
   id: string;
   name: string | null;
   notes: string | null;
+  key: string | null;
   login?: CipherLogin | null;
 }
 
 type RawCipher = Record<string, unknown>;
+
+function parseKdf(obj: unknown): KdfInfo {
+  const o = obj as Record<string, unknown>;
+  return {
+    type: Number(pick(o, 'Kdf', 'kdf') ?? 0),
+    iterations: Number(pick(o, 'KdfIterations', 'kdfIterations') ?? 600000),
+    memory: Number(pick(o, 'KdfMemory', 'kdfMemory') ?? 64),
+    parallelism: Number(pick(o, 'KdfParallelism', 'kdfParallelism') ?? 4),
+  };
+}
 
 function normalizeCipher(raw: RawCipher): Cipher {
   const login = (pick(raw, 'Login', 'login') as RawCipher | undefined) ?? undefined;
@@ -358,6 +382,7 @@ function normalizeCipher(raw: RawCipher): Cipher {
     id: String(pick(raw, 'Id', 'id')),
     name: (pick(raw, 'Name', 'name') as string | null) ?? null,
     notes: (pick(raw, 'Notes', 'notes') as string | null) ?? null,
+    key: (pick(raw, 'Key', 'key') as string | null) ?? null,
     login: login
       ? {
           username: (pick(login, 'Username', 'username') as string | null) ?? null,
@@ -385,6 +410,23 @@ function hkdfExpand(prk: Buffer, info: string, size: number): Buffer {
     chunks.push(t);
   }
   return Buffer.concat(chunks).subarray(0, size);
+}
+
+function decryptField(
+  enc: string | null | undefined,
+  encKey: Buffer,
+  macKey: Buffer,
+): string | null {
+  const buf = enc ? tryDecrypt(enc, encKey, macKey) : null;
+  return buf ? buf.toString('utf8') : null;
+}
+
+function tryDecrypt(enc: string, encKey: Buffer, macKey: Buffer): Buffer | null {
+  try {
+    return decryptEncString(enc, encKey, macKey);
+  } catch {
+    return null;
+  }
 }
 
 /** Parses and decrypts a type-2 EncString ("2.iv|ct|mac"). */
@@ -418,6 +460,3 @@ function encryptEncString(plaintext: string, encKey: Buffer, macKey: Buffer): st
     .digest();
   return `2.${iv.toString('base64')}|${ct.toString('base64')}|${mac.toString('base64')}`;
 }
-
-// Exposed for the crypto self-test.
-export const _internal = { hkdfExpand, decryptEncString, encryptEncString };

@@ -9,6 +9,9 @@ packages:
   Citadel:
     url: https://github.com/orlandos-nl/Citadel.git
     from: "0.7.0"
+  Argon2Swift:
+    url: https://github.com/tmthecoder/Argon2Swift.git
+    from: "1.0.0"
 
 targets:
   ServerCase:
@@ -18,6 +21,7 @@ targets:
       - ServerCase
     dependencies:
       - package: Citadel
+      - package: Argon2Swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.servercase.app

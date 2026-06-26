@@ -2,6 +2,7 @@ import Foundation
 import CommonCrypto
 import CryptoKit
 import Security
+import Argon2Swift
 
 enum BitwardenLockState: String, Codable {
     case unauthenticated
@@ -79,8 +80,8 @@ actor BitwardenVault {
 
     func unlock(_ masterPassword: String) async throws -> BitwardenStatus {
         guard configured else { throw BitwardenError.notConfigured }
-        let kdf = await prelogin()
         let token = try await requestToken()
+        let kdf = token.kdf ?? (await prelogin())
 
         let masterKey = try deriveMasterKey(masterPassword, kdf: kdf)
         let stretchedEnc = hkdfExpand(masterKey, info: "enc", length: 32)
@@ -113,7 +114,8 @@ actor BitwardenVault {
         let ciphers = try await fetchCiphers()
         var out: [String: ServerSecrets] = [:]
         for cipher in ciphers {
-            if let name = decryptField(cipher.name), name.hasPrefix(settings.itemPrefix) {
+            guard let (enc, mac) = try? cipherKeys(cipher) else { continue }
+            if let name = decryptWith(cipher.name, enc, mac), name.hasPrefix(settings.itemPrefix) {
                 out[String(name.dropFirst(settings.itemPrefix.count))] = decodeSecrets(cipher)
             }
         }
@@ -153,28 +155,56 @@ actor BitwardenVault {
     // MARK: Crypto
 
     private func deriveMasterKey(_ password: String, kdf: KdfInfo) throws -> Data {
-        guard kdf.type == 0 else {
-            throw BitwardenError.crypto("Only the PBKDF2 KDF is supported; switch your account KDF to PBKDF2.")
+        let email = settings.email.trimmingCharacters(in: .whitespaces).lowercased()
+        switch kdf.type {
+        case 0:
+            return pbkdf2(password, salt: email, iterations: kdf.iterations, keyLength: 32)
+        case 1:
+            // Bitwarden Argon2id: salt = SHA-256(email), memory in MiB → KiB.
+            let salt = Data(SHA256.hash(data: Data(email.utf8)))
+            let result = try Argon2Swift.hashPasswordBytes(
+                password: Data(password.utf8),
+                salt: Salt(bytes: salt),
+                iterations: kdf.iterations,
+                memory: kdf.memory * 1024,
+                parallelism: kdf.parallelism,
+                length: 32,
+                type: .id,
+                version: .V13
+            )
+            return result.hashData()
+        default:
+            throw BitwardenError.crypto("unsupported KDF type \(kdf.type)")
         }
-        let salt = settings.email.trimmingCharacters(in: .whitespaces).lowercased()
-        return pbkdf2(password, salt: salt, iterations: kdf.iterations, keyLength: 32)
     }
 
     private func encryptField(_ plaintext: String) throws -> String {
         try encryptEncString(Data(plaintext.utf8), encKey: encKey(), macKey: macKey())
     }
 
-    private func decryptField(_ enc: String?) -> String? {
-        guard let enc, let enc2 = try? decryptEncString(enc, encKey: encKey(), macKey: macKey()) else { return nil }
-        return String(data: enc2, encoding: .utf8)
+    private func decryptWith(_ enc: String?, _ encKey: Data, _ macKey: Data) -> String? {
+        guard let enc, let d = try? decryptEncString(enc, encKey: encKey, macKey: macKey) else { return nil }
+        return String(data: d, encoding: .utf8)
+    }
+
+    /// The keys to use for a cipher's fields: its own key, or the user key.
+    private func cipherKeys(_ cipher: Cipher) throws -> (Data, Data) {
+        if let k = cipher.key,
+           let raw = try? decryptEncString(k, encKey: try encKey(), macKey: try macKey()),
+           raw.count >= 64 {
+            return (raw.prefix(32), raw.subdata(in: 32..<64))
+        }
+        return (try encKey(), try macKey())
     }
 
     private func decodeSecrets(_ cipher: Cipher) -> ServerSecrets {
-        if let notes = decryptField(cipher.notes), let data = notes.data(using: .utf8),
+        guard let (enc, mac) = try? cipherKeys(cipher) else { return ServerSecrets() }
+        if let notes = decryptWith(cipher.notes, enc, mac), let data = notes.data(using: .utf8),
            let secrets = try? JSONDecoder().decode(ServerSecrets.self, from: data) {
             return secrets
         }
-        return ServerSecrets(username: decryptField(cipher.username), password: decryptField(cipher.password))
+        return ServerSecrets(username: decryptWith(cipher.username, enc, mac),
+                             password: decryptWith(cipher.password, enc, mac))
     }
 
     private func encKey() throws -> Data {
@@ -196,11 +226,18 @@ actor BitwardenVault {
         if let data = try? await rawRequest("POST", url: identityUrl + "/accounts/prelogin",
                                             json: body, bearer: false),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let type = (pick(obj, "Kdf", "kdf") as? Int) ?? 0
-            let iters = (pick(obj, "KdfIterations", "kdfIterations") as? Int) ?? 600000
-            return KdfInfo(type: type, iterations: iters)
+            return parseKdf(obj)
         }
-        return KdfInfo(type: 0, iterations: 600000)
+        return KdfInfo(type: 0, iterations: 600000, memory: 64, parallelism: 4)
+    }
+
+    private func parseKdf(_ obj: [String: Any]) -> KdfInfo {
+        KdfInfo(
+            type: (pick(obj, "Kdf", "kdf") as? Int) ?? 0,
+            iterations: (pick(obj, "KdfIterations", "kdfIterations") as? Int) ?? 600000,
+            memory: (pick(obj, "KdfMemory", "kdfMemory") as? Int) ?? 64,
+            parallelism: (pick(obj, "KdfParallelism", "kdfParallelism") as? Int) ?? 4
+        )
     }
 
     private func requestToken() async throws -> TokenResult {
@@ -231,7 +268,8 @@ actor BitwardenVault {
         }
         let token = obj["access_token"] as? String ?? ""
         let expires = (obj["expires_in"] as? Double) ?? 3600
-        return TokenResult(accessToken: token, expiresInSec: expires, key: key)
+        let kdf = pick(obj, "Kdf", "kdf") != nil ? parseKdf(obj) : nil
+        return TokenResult(accessToken: token, expiresInSec: expires, key: key, kdf: kdf)
     }
 
     private func fetchCiphers() async throws -> [Cipher] {
@@ -244,7 +282,10 @@ actor BitwardenVault {
 
     private func findCipher(_ serverId: String) async throws -> Cipher? {
         let target = settings.itemPrefix + serverId
-        return try await fetchCiphers().first { decryptField($0.name) == target }
+        return try await fetchCiphers().first { cipher in
+            guard let (enc, mac) = try? cipherKeys(cipher) else { return false }
+            return decryptWith(cipher.name, enc, mac) == target
+        }
     }
 
     @discardableResult
@@ -374,18 +415,22 @@ actor BitwardenVault {
 private struct KdfInfo {
     let type: Int
     let iterations: Int
+    let memory: Int
+    let parallelism: Int
 }
 
 private struct TokenResult {
     let accessToken: String
     let expiresInSec: Double
     let key: String
+    let kdf: KdfInfo?
 }
 
 private struct Cipher {
     let id: String
     let name: String?
     let notes: String?
+    let key: String?
     let username: String?
     let password: String?
 
@@ -397,6 +442,7 @@ private struct Cipher {
         id = (pick("Id", "id") as? String) ?? ""
         name = pick("Name", "name") as? String
         notes = pick("Notes", "notes") as? String
+        key = pick("Key", "key") as? String
         let login = (pick("Login", "login") as? [String: Any]) ?? [:]
         func loginPick(_ keys: String...) -> String? {
             for k in keys { if let v = login[k], !(v is NSNull) { return v as? String } }

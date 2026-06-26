@@ -35,13 +35,16 @@ account crypto in `electron/bitwarden.ts` — no `bw` CLI and no official SDK.
    (blank for the cloud), your account email, and the API key, then unlock with
    your master password.
 3. Auth uses OAuth `client_credentials` (no 2FA prompt). The master password is
-   used only to derive the vault key locally (PBKDF2 → HKDF → AES‑CBC‑256 +
-   HMAC‑SHA256) and is never sent to the server or persisted. Each server maps
-   to one vault item named `${prefix}${serverId}`.
+   used only to derive the vault key locally (PBKDF2 **or Argon2id** → HKDF →
+   AES‑CBC‑256 + HMAC‑SHA256) and is never sent to the server or persisted.
+   Each server maps to one vault item named `${prefix}${serverId}`.
 
 Notes:
-- Only the **PBKDF2** KDF is supported. Argon2id accounts must switch their
-  account KDF to PBKDF2 (web vault → Security → Keys).
+- Both the **PBKDF2** and **Argon2id** KDFs are supported (Argon2id via the
+  MIT-licensed `@noble/hashes`, verified against the RFC 9106 test vector).
+- The KDF parameters and per-cipher keys follow the documented Bitwarden
+  security model — referenced from the protocol, not from any official client
+  code (which is GPL and license-incompatible with this BSD-3 project).
 - The API key `client_secret` is stored locally and is redacted from the sync
   file.
 

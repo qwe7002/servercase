@@ -15,9 +15,9 @@ Jetpack Compose, Material 3 and SSHJ.
   - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault,
     reached directly over the Bitwarden REST API with a clean-room crypto
     implementation (no `bw` CLI). Authenticate with a personal API key; the
-    master password derives the vault key locally. Only the PBKDF2 KDF is
-    supported. When off, secrets stay on-device and are never written to the
-    sync file.
+    master password derives the vault key locally (PBKDF2 or Argon2id, the
+    latter via BouncyCastle). When off, secrets stay on-device and are never
+    written to the sync file.
   - **Snippets** — reusable terminal commands.
   - **Auto-sync** — periodic JSON export of servers + settings (secrets
     excluded), with SAF export/import.
