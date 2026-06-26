@@ -63,6 +63,10 @@ struct DashboardView: View {
         }
     }
 
+    /// Cards flow into as many ~340pt columns as the width allows: one on
+    /// iPhone, two or more in the wide iPad detail pane.
+    private let cardColumns = [GridItem(.adaptive(minimum: 340), spacing: 16)]
+
     private var overview: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -75,13 +79,14 @@ struct DashboardView: View {
                 }
 
                 if !connected {
-                    placeholder(state == .connecting ? "Establishing SSH connection…"
-                                                       : "Not connected. Go back and tap the server to connect.")
+                    notConnected
                 } else if let status {
-                    gauges(status)
-                    infoCard(status)
-                    memoryCard(status)
-                    disksCard(status)
+                    LazyVGrid(columns: cardColumns, alignment: .leading, spacing: 16) {
+                        gauges(status)
+                        infoCard(status)
+                        memoryCard(status)
+                        disksCard(status)
+                    }
                 } else {
                     placeholder("Collecting status…")
                 }
@@ -92,8 +97,33 @@ struct DashboardView: View {
         }
     }
 
+    @ViewBuilder
+    private var notConnected: some View {
+        VStack(spacing: 16) {
+            if state == .connecting {
+                ProgressView()
+                Text("Establishing SSH connection…").foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(.largeTitle).foregroundStyle(.secondary)
+                Text("Not connected.").foregroundStyle(.secondary)
+                Button {
+                    model.connectIfNeeded(server)
+                } label: {
+                    Label("Connect", systemImage: "bolt.horizontal.circle")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+    }
+
     private func placeholder(_ text: String) -> some View {
-        Text(text).foregroundStyle(.secondary).padding(.vertical, 40)
+        Text(text)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 40)
     }
 
     private func gauges(_ s: ServerStatus) -> some View {
