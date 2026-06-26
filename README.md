@@ -10,6 +10,7 @@ standalone, idiomatic implementation for its platform that shares the
 | Android | Jetpack Compose (Kotlin, MVVM) | [SSHJ](https://github.com/hierynomus/sshj) | [`android/`](android) |
 | iOS | SwiftUI (MVVM) | [Citadel](https://github.com/orlandos-nl/Citadel) | [`ios/`](ios) |
 | MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
+| Probe agent | Rust | local Linux `/proc` | [`probe/`](probe) |
 
 The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
 server that lets an AI assistant manage your servers (run command, status,
@@ -17,6 +18,11 @@ SFTP). It is a thin proxy to the desktop app's local control bridge: **login,
 credentials and the Bitwarden vault stay in ServerCase** — the MCP server holds
 only a URL and token and never sees secrets. Enable it under **Settings → AI**;
 a read-only mode is available. See its [README](mcp/README.md).
+
+The [`probe/`](probe) package is a Rust host probe agent. It emits stable
+`servercase.probe.v1` JSON snapshots from Linux `/proc`; a future Cloudflare
+Worker can receive those snapshots to provide cloud-side status visibility
+without moving SSH credentials out of ServerCase.
 
 ## Shared design
 

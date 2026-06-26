@@ -1,0 +1,14 @@
+[package]
+name = "servercase-probe"
+version = "0.1.0"
+edition = "2021"
+description = "ServerCase host probe agent"
+license = "BSD-3-Clause"
+
+[lib]
+name = "servercase_probe"
+path = "src/lib.rs"
+
+[[bin]]
+name = "servercase-probe"
+path = "src/main.rs"
