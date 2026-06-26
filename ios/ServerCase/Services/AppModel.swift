@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
 
     private var services: [UUID: SSHService] = [:]
     private var collectors: [UUID: StatusParser.CollectorState] = [:]
+    private var connectionTokens: [UUID: UUID] = [:]
     private var pollTask: Task<Void, Never>?
     private var autoSyncTask: Task<Void, Never>?
 
@@ -59,7 +60,23 @@ final class AppModel: ObservableObject {
 
     // MARK: Connection
 
+    func connectIfNeeded(_ server: ServerConfig) {
+        switch state(server.id) {
+        case .connected, .connecting:
+            return
+        case .disconnected, .error:
+            connect(server)
+        }
+    }
+
+    func reconnect(_ server: ServerConfig) {
+        disconnect(server.id)
+        connect(server)
+    }
+
     func connect(_ server: ServerConfig) {
+        let token = UUID()
+        connectionTokens[server.id] = token
         connState[server.id] = .connecting
         Task {
             var cfg = server
@@ -72,8 +89,13 @@ final class AppModel: ObservableObject {
             collectors[server.id] = StatusParser.CollectorState()
             do {
                 try await service.connect()
+                guard connectionTokens[server.id] == token else {
+                    await service.disconnect()
+                    return
+                }
                 connState[server.id] = .connected
             } catch {
+                guard connectionTokens[server.id] == token else { return }
                 connState[server.id] = .error(error.localizedDescription)
                 services[server.id] = nil
             }
@@ -81,6 +103,7 @@ final class AppModel: ObservableObject {
     }
 
     func disconnect(_ id: UUID) {
+        connectionTokens[id] = nil
         if let service = services[id] {
             Task { await service.disconnect() }
         }

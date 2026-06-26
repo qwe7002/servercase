@@ -28,18 +28,6 @@ struct DashboardView: View {
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if connected {
-                    Button("Disconnect") { model.disconnect(server.id) }
-                } else {
-                    Button(state == .connecting ? "Connecting…" : "Connect") {
-                        model.connect(server)
-                    }
-                    .disabled(state == .connecting)
-                }
-            }
-        }
         .onAppear { model.startPolling(server.id) }
         .onDisappear { model.stopPolling() }
     }
@@ -77,7 +65,7 @@ struct DashboardView: View {
 
                 if !connected {
                     placeholder(state == .connecting ? "Establishing SSH connection…"
-                                                       : "Not connected. Tap Connect for live status.")
+                                                       : "Not connected. Go back and tap the server to connect.")
                 } else if let status {
                     gauges(status)
                     infoCard(status)

@@ -12,9 +12,10 @@ struct ServerListView: View {
     @State private var addingNew = false
     @State private var showingSettings = false
     @State private var searchText = ""
+    @State private var path: [ServerConfig] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if model.servers.isEmpty {
                     ContentUnavailableView(
@@ -94,8 +95,27 @@ struct ServerListView: View {
 
     @ViewBuilder
     private func serverLink(_ server: ServerConfig) -> some View {
-        NavigationLink(value: server) {
+        Button {
+            model.connectIfNeeded(server)
+            path.append(server)
+        } label: {
             row(server)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if model.state(server.id) == .connected || model.state(server.id) == .connecting {
+                Button(role: .destructive) {
+                    model.disconnect(server.id)
+                } label: {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                }
+            }
+
+            Button {
+                model.reconnect(server)
+            } label: {
+                Label("Reconnect", systemImage: "arrow.clockwise")
+            }
         }
         .swipeActions(edge: .trailing) {
             Button(role: .destructive) { model.delete(server) } label: {
