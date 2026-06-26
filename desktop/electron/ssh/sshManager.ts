@@ -24,6 +24,8 @@ interface Connection {
   sftp?: SFTPWrapper;
   /** Pre-auth SSH banner (e.g. /etc/issue.net), shown when a shell opens. */
   banner?: string;
+  /** Login message read from the remote host, shown when a shell opens. */
+  motd?: Promise<string>;
 }
 
 export type ConnectionStateListener = (
@@ -98,6 +100,7 @@ export class SshManager {
             collector: {},
             shells: new Map(),
             banner: banner || undefined,
+            motd: this.readMotd(client),
           });
           this.onState(cfg.id, 'connected');
           resolve();
@@ -155,9 +158,15 @@ export class SshManager {
     });
   }
 
-  openShell(serverId: string, shellId: string, cols: number, rows: number): void {
+  async openShell(
+    serverId: string,
+    shellId: string,
+    cols: number,
+    rows: number,
+  ): Promise<void> {
     const conn = this.conns.get(serverId);
     if (!conn) throw new Error('not connected');
+    const motd = await conn.motd;
     conn.client.shell({ term: 'xterm-256color', cols, rows }, (err, stream) => {
       if (err) {
         this.onShellClosed(serverId, shellId);
@@ -173,6 +182,9 @@ export class SshManager {
           conn.banner.replace(/\r?\n/g, '\r\n') + '\r\n',
         );
       }
+      if (motd) {
+        this.onShellOutput(serverId, shellId, motd.replace(/\r?\n/g, '\r\n'));
+      }
       stream
         .on('data', (d: Buffer) =>
           this.onShellOutput(serverId, shellId, d.toString('utf8')),
@@ -184,6 +196,29 @@ export class SshManager {
       stream.stderr.on('data', (d: Buffer) =>
         this.onShellOutput(serverId, shellId, d.toString('utf8')),
       );
+    });
+  }
+
+  private readMotd(client: Client): Promise<string> {
+    const command = [
+      'for f in /run/motd.dynamic /etc/motd; do',
+      '  [ -r "$f" ] && cat "$f";',
+      'done',
+    ].join(' ');
+    return new Promise((resolve) => {
+      client.exec(command, (err, stream) => {
+        if (err) {
+          resolve('');
+          return;
+        }
+        let out = '';
+        stream
+          .on('data', (d: Buffer) => {
+            out += d.toString('utf8');
+          })
+          .on('close', () => resolve(out.trimEnd() ? `${out.trimEnd()}\n` : ''));
+        stream.stderr.resume();
+      });
     });
   }
 
