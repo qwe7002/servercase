@@ -6,7 +6,7 @@ struct ServerCaseApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            ServerListView()
                 .environmentObject(model)
                 .preferredColorScheme(.dark)
         }
