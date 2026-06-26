@@ -53,9 +53,12 @@ interface ServersState {
   removeServer: (id: string) => void;
   select: (id: string | null) => void;
 
-  /** Names of groups the user has collapsed in the sidebar. */
+  /** Sidebar view: a flat list of all hosts, or grouped. */
+  viewMode: 'all' | 'groups';
+  setViewMode: (mode: 'all' | 'groups') => void;
+  /** Ids of groups the user has collapsed in the sidebar. */
   collapsedGroups: string[];
-  toggleGroup: (name: string) => void;
+  toggleGroup: (id: string) => void;
 
   setConnState: (id: string, state: ConnectionState, error?: string) => void;
   setStatus: (id: string, status: ServerStatus) => void;
@@ -78,6 +81,7 @@ export const useServers = create<ServersState>()(
       connState: {},
       status: {},
       lastError: {},
+      viewMode: 'all',
       collapsedGroups: [],
 
       addServer: (cfg) => {
@@ -103,11 +107,12 @@ export const useServers = create<ServersState>()(
       },
       select: (id) => set({ selectedId: id }),
 
-      toggleGroup: (name) =>
+      setViewMode: (mode) => set({ viewMode: mode }),
+      toggleGroup: (id) =>
         set((s) => ({
-          collapsedGroups: s.collapsedGroups.includes(name)
-            ? s.collapsedGroups.filter((g) => g !== name)
-            : [...s.collapsedGroups, name],
+          collapsedGroups: s.collapsedGroups.includes(id)
+            ? s.collapsedGroups.filter((g) => g !== id)
+            : [...s.collapsedGroups, id],
         })),
 
       setConnState: (id, state, error) =>
@@ -146,6 +151,7 @@ export const useServers = create<ServersState>()(
       partialize: (s) => ({
         servers: vaultEnabled() ? s.servers.map(stripSecrets) : s.servers,
         collapsedGroups: s.collapsedGroups,
+        viewMode: s.viewMode,
       }),
     },
   ),

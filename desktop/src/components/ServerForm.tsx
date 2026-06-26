@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AuthType, ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
+import { useSettings } from '../store/settings';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,13 +25,10 @@ interface Props {
 export function ServerForm({ existing, onDone }: Props) {
   const addServer = useServers((s) => s.addServer);
   const updateServer = useServers((s) => s.updateServer);
-  const servers = useServers((s) => s.servers);
-  const existingGroups = [
-    ...new Set(servers.map((s) => s.group).filter((g): g is string => !!g)),
-  ];
+  const groups = useSettings((s) => s.settings.groups);
 
   const [name, setName] = useState(existing?.name ?? '');
-  const [group, setGroup] = useState(existing?.group ?? '');
+  const [groupId, setGroupId] = useState(existing?.groupId ?? '');
   const [host, setHost] = useState(existing?.host ?? '');
   const [port, setPort] = useState(String(existing?.port ?? 22));
   const [username, setUsername] = useState(existing?.username ?? 'root');
@@ -51,7 +49,7 @@ export function ServerForm({ existing, onDone }: Props) {
       host: host.trim(),
       port: Number(port) || 22,
       username: username.trim(),
-      group: group.trim() || undefined,
+      groupId: groupId || undefined,
       authType,
       password: authType === 'password' ? password : undefined,
       privateKey: authType === 'key' ? privateKey : undefined,
@@ -89,18 +87,19 @@ export function ServerForm({ existing, onDone }: Props) {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="server-group">Group</Label>
-                <Input
+                <select
                   id="server-group"
-                  value={group}
-                  list="server-groups"
-                  placeholder="Optional"
-                  onChange={(e) => setGroup(e.target.value)}
-                />
-                <datalist id="server-groups">
-                  {existingGroups.map((g) => (
-                    <option key={g} value={g} />
+                  value={groupId}
+                  onChange={(e) => setGroupId(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">No group</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
             </div>
 

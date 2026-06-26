@@ -11,8 +11,8 @@ export interface ServerConfig {
   port: number;
   username: string;
   authType: AuthType;
-  /** Optional group/folder name for organizing the server list. */
-  group?: string;
+  /** Id of the {@link Group} this server belongs to, if any. */
+  groupId?: string;
   /** Present when authType === 'password'. */
   password?: string;
   /** PEM private key text, present when authType === 'key'. */
@@ -117,11 +117,18 @@ export interface BridgeSettings {
   port: number;
 }
 
+/** A named group/folder used to organize the server list. */
+export interface Group {
+  id: string;
+  name: string;
+}
+
 export interface GlobalSettings {
   bitwarden: BitwardenSettings;
   snippets: Snippet[];
   autoSync: AutoSyncSettings;
   bridge: BridgeSettings;
+  groups: Group[];
 }
 
 /** Runtime status of the control bridge, surfaced to the Settings UI. */

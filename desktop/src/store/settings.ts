@@ -30,6 +30,7 @@ const DEFAULTS: GlobalSettings = {
     enabled: false,
     port: 8765,
   },
+  groups: [],
 };
 
 interface SettingsState {
@@ -42,6 +43,10 @@ interface SettingsState {
   addSnippet: (s: Omit<Snippet, 'id'>) => void;
   updateSnippet: (s: Snippet) => void;
   removeSnippet: (id: string) => void;
+
+  addGroup: (name: string) => string;
+  renameGroup: (id: string, name: string) => void;
+  removeGroup: (id: string) => void;
 
   /** Replace the whole settings object (used when importing a sync file). */
   replaceSettings: (s: GlobalSettings) => void;
@@ -95,6 +100,28 @@ export const useSettings = create<SettingsState>()(
           settings: {
             ...s.settings,
             snippets: s.settings.snippets.filter((x) => x.id !== id),
+          },
+        })),
+
+      addGroup: (name) => {
+        const id = uid();
+        set((s) => ({
+          settings: { ...s.settings, groups: [...s.settings.groups, { id, name }] },
+        }));
+        return id;
+      },
+      renameGroup: (id, name) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            groups: s.settings.groups.map((g) => (g.id === id ? { ...g, name } : g)),
+          },
+        })),
+      removeGroup: (id) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            groups: s.settings.groups.filter((g) => g.id !== id),
           },
         })),
 

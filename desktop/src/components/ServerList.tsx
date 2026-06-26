@@ -1,12 +1,18 @@
+import { useState } from 'react';
 import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
+import { useSettings } from '../store/settings';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
   ChevronDown,
   ChevronRight,
+  Folders,
   Pencil,
   Plus,
+  Search,
   Server,
   Settings as SettingsIcon,
   Trash2,
@@ -16,6 +22,7 @@ interface Props {
   onAdd: () => void;
   onEdit: (cfg: ServerConfig) => void;
   onOpenSettings: () => void;
+  onManageGroups: () => void;
 }
 
 const STATE_LABEL: Record<string, string> = {
@@ -25,25 +32,42 @@ const STATE_LABEL: Record<string, string> = {
   disconnected: 'Offline',
 };
 
-const UNGROUPED = '';
+const UNGROUPED = '__ungrouped__';
 
-export function ServerList({ onAdd, onEdit, onOpenSettings }: Props) {
+export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Props) {
   const servers = useServers((s) => s.servers);
+  const groups = useSettings((s) => s.settings.groups);
+  const viewMode = useServers((s) => s.viewMode);
+  const setViewMode = useServers((s) => s.setViewMode);
   const collapsedGroups = useServers((s) => s.collapsedGroups);
   const toggleGroup = useServers((s) => s.toggleGroup);
 
-  // Bucket servers by group, preserving first-appearance order.
-  const order: string[] = [];
-  const byGroup = new Map<string, ServerConfig[]>();
-  for (const srv of servers) {
-    const g = srv.group?.trim() || UNGROUPED;
-    if (!byGroup.has(g)) {
-      byGroup.set(g, []);
-      order.push(g);
-    }
-    byGroup.get(g)!.push(srv);
-  }
-  const hasGroups = order.some((g) => g !== UNGROUPED);
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const matches = (s: ServerConfig) =>
+    !q ||
+    s.name.toLowerCase().includes(q) ||
+    s.host.toLowerCase().includes(q) ||
+    s.username.toLowerCase().includes(q);
+
+  // Group sections (only when not searching and in "groups" mode).
+  const sections = [
+    ...groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      items: servers.filter((s) => s.groupId === g.id),
+    })),
+    {
+      id: UNGROUPED,
+      name: 'Ungrouped',
+      items: servers.filter(
+        (s) => !s.groupId || !groups.some((g) => g.id === s.groupId),
+      ),
+    },
+  ].filter((sec) => sec.items.length > 0);
+
+  const grouped = viewMode === 'groups' && !q;
+  const filtered = servers.filter(matches);
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r bg-card/60">
@@ -64,43 +88,84 @@ export function ServerList({ onAdd, onEdit, onOpenSettings }: Props) {
         </div>
       </div>
 
+      <div className="space-y-2 border-b p-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            placeholder="Search servers…"
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-8 pl-8"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Tabs
+            value={viewMode}
+            onValueChange={(v) => setViewMode(v as 'all' | 'groups')}
+            className="flex-1"
+          >
+            <TabsList className="grid h-8 w-full grid-cols-2">
+              <TabsTrigger value="all" className="text-xs">
+                All
+              </TabsTrigger>
+              <TabsTrigger value="groups" className="text-xs">
+                Groups
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8 shrink-0"
+            title="Manage groups"
+            onClick={onManageGroups}
+          >
+            <Folders className="size-4" />
+          </Button>
+        </div>
+      </div>
+
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
         {servers.length === 0 && (
           <p className="px-3 py-8 text-center text-sm text-muted-foreground">
             No servers yet. Add one to get started.
           </p>
         )}
+        {servers.length > 0 && filtered.length === 0 && (
+          <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+            No servers match “{query}”.
+          </p>
+        )}
 
-        {!hasGroups
-          ? servers.map((srv) => (
-              <ServerRow key={srv.id} srv={srv} onEdit={onEdit} />
-            ))
-          : order.map((group) => {
-              const collapsed = collapsedGroups.includes(group);
-              const items = byGroup.get(group)!;
+        {grouped
+          ? sections.map((sec) => {
+              const collapsed = collapsedGroups.includes(sec.id);
               return (
-                <div key={group || '__ungrouped__'}>
+                <div key={sec.id}>
                   <button
                     className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent/60"
-                    onClick={() => toggleGroup(group)}
+                    onClick={() => toggleGroup(sec.id)}
                   >
                     {collapsed ? (
                       <ChevronRight className="size-3.5" />
                     ) : (
                       <ChevronDown className="size-3.5" />
                     )}
-                    <span className="truncate uppercase tracking-wide">
-                      {group || 'Ungrouped'}
+                    <span className="truncate uppercase tracking-wide">{sec.name}</span>
+                    <span className="ml-auto tabular-nums opacity-60">
+                      {sec.items.length}
                     </span>
-                    <span className="ml-auto tabular-nums opacity-60">{items.length}</span>
                   </button>
                   {!collapsed &&
-                    items.map((srv) => (
+                    sec.items.map((srv) => (
                       <ServerRow key={srv.id} srv={srv} onEdit={onEdit} />
                     ))}
                 </div>
               );
-            })}
+            })
+          : filtered.map((srv) => (
+              <ServerRow key={srv.id} srv={srv} onEdit={onEdit} />
+            ))}
       </div>
     </aside>
   );

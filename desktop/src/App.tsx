@@ -8,6 +8,7 @@ import { ServerList } from './components/ServerList';
 import { ServerForm } from './components/ServerForm';
 import { Dashboard } from './components/Dashboard';
 import { Settings } from './components/Settings';
+import { GroupsDialog } from './components/GroupsDialog';
 
 export function App() {
   useConnections();
@@ -20,6 +21,7 @@ export function App() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ServerConfig | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
 
   const openAdd = () => {
     setEditing(undefined);
@@ -36,6 +38,7 @@ export function App() {
         onAdd={openAdd}
         onEdit={openEdit}
         onOpenSettings={() => setSettingsOpen(true)}
+        onManageGroups={() => setGroupsOpen(true)}
       />
       {selected ? (
         <Dashboard key={selected.id} server={selected} />
@@ -50,6 +53,7 @@ export function App() {
         <ServerForm existing={editing} onDone={() => setFormOpen(false)} />
       )}
       {settingsOpen && <Settings onDone={() => setSettingsOpen(false)} />}
+      {groupsOpen && <GroupsDialog onDone={() => setGroupsOpen(false)} />}
     </div>
   );
 }
