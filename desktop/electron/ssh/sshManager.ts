@@ -22,6 +22,8 @@ interface Connection {
   collector: CollectorState;
   shells: Map<string, ClientChannel>;
   sftp?: SFTPWrapper;
+  /** Pre-auth SSH banner (e.g. /etc/issue.net), shown when a shell opens. */
+  banner?: string;
 }
 
 export type ConnectionStateListener = (
@@ -85,12 +87,17 @@ export class SshManager {
     if (this.conns.has(cfg.id)) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const client = new Client();
+      let banner = '';
       client
+        .on('banner', (message: string) => {
+          banner = message;
+        })
         .on('ready', () => {
           this.conns.set(cfg.id, {
             client,
             collector: {},
             shells: new Map(),
+            banner: banner || undefined,
           });
           this.onState(cfg.id, 'connected');
           resolve();
@@ -157,6 +164,15 @@ export class SshManager {
         return;
       }
       conn.shells.set(shellId, stream);
+      // Surface the pre-auth SSH banner (delivered during auth, not on the
+      // shell stream) so the terminal shows the server's welcome message.
+      if (conn.banner) {
+        this.onShellOutput(
+          serverId,
+          shellId,
+          conn.banner.replace(/\r?\n/g, '\r\n') + '\r\n',
+        );
+      }
       stream
         .on('data', (d: Buffer) =>
           this.onShellOutput(serverId, shellId, d.toString('utf8')),
