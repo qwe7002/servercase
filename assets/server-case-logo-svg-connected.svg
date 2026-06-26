@@ -1,0 +1,129 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Server Case Logo</title>
+  <desc>Refined SVG icon based on the original image: a rounded blue app tile with two connected desktop computers, cleaner proportions, corrected shadows, connected right-side cable, and consistent monitor-frame shading.</desc>
+
+  <defs>
+    <linearGradient id="bgGrad" x1="126" y1="96" x2="900" y2="934" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1989FF"/>
+      <stop offset="0.55" stop-color="#0478FA"/>
+      <stop offset="1" stop-color="#0067EA"/>
+    </linearGradient>
+
+    <radialGradient id="bgLight" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(424 360) rotate(59) scale(620 510)">
+      <stop offset="0" stop-color="#35A4FF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#006BEF" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="screenBlue" x1="258" y1="257" x2="521" y2="421" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#55BBFF"/>
+      <stop offset="1" stop-color="#1594F8"/>
+    </linearGradient>
+
+    <linearGradient id="screenTeal" x1="562" y1="559" x2="800" y2="707" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2ED1CE"/>
+      <stop offset="1" stop-color="#08AEA8"/>
+    </linearGradient>
+
+    <linearGradient id="whiteShell" x1="250" y1="225" x2="520" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F3F7FB"/>
+    </linearGradient>
+
+    <linearGradient id="whiteShellRight" x1="528" y1="526" x2="834" y2="751" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F3F7FB"/>
+    </linearGradient>
+
+    <linearGradient id="bottomBar" x1="392" y1="421" x2="392" y2="469" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F9FBFD"/>
+      <stop offset="1" stop-color="#E9F0F7"/>
+    </linearGradient>
+
+    <linearGradient id="bottomBarRight" x1="681" y1="707" x2="681" y2="751" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F9FBFD"/>
+      <stop offset="1" stop-color="#E9F0F7"/>
+    </linearGradient>
+
+    <linearGradient id="metal" x1="418" y1="470" x2="418" y2="543" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DCE8F1"/>
+      <stop offset="1" stop-color="#B9C7D3"/>
+    </linearGradient>
+
+    <linearGradient id="metalRight" x1="681" y1="752" x2="681" y2="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DCE8F1"/>
+      <stop offset="1" stop-color="#B9C7D3"/>
+    </linearGradient>
+
+    <linearGradient id="nodeGrad" x1="352" y1="721" x2="430" y2="790" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE66D"/>
+      <stop offset="1" stop-color="#FFC83A"/>
+    </linearGradient>
+
+    <filter id="tileShadow" x="40" y="30" width="944" height="944" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0A3D78" flood-opacity="0.10"/>
+    </filter>
+
+    <filter id="objectShadow" x="170" y="170" width="720" height="710" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="14" dy="18" stdDeviation="6" flood-color="#004EB8" flood-opacity="0.34"/>
+    </filter>
+
+    <filter id="cableShadow" x="320" y="520" width="440" height="330" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="5" dy="8" stdDeviation="3" flood-color="#004EB8" flood-opacity="0.22"/>
+    </filter>
+
+    <filter id="nodeShadow" x="320" y="690" width="145" height="135" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="7" dy="9" stdDeviation="4" flood-color="#004EB8" flood-opacity="0.25"/>
+    </filter>
+
+    <clipPath id="leftScreenClip">
+      <rect x="258" y="257" width="263" height="164" rx="8"/>
+    </clipPath>
+
+    <clipPath id="rightScreenClip">
+      <rect x="562" y="559" width="238" height="148" rx="8"/>
+    </clipPath>
+  </defs>
+
+  <!-- App tile -->
+  <g filter="url(#tileShadow)">
+    <rect x="66" y="55" width="892" height="895" rx="198" fill="url(#bgGrad)"/>
+    <rect x="66" y="55" width="892" height="895" rx="198" fill="url(#bgLight)"/>
+  </g>
+
+  <!-- Network cable: drawn under computers and node, matching the original image layering. -->
+  <g filter="url(#cableShadow)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M392 552V756" stroke="#FDFEFF" stroke-width="20"/>
+    <path d="M392 756H650" stroke="#FDFEFF" stroke-width="20"/>
+  </g>
+
+  <!-- Left computer -->
+  <g filter="url(#objectShadow)">
+    <rect x="222" y="223" width="336" height="246" rx="27" fill="url(#whiteShell)"/>
+    <rect x="258" y="257" width="263" height="164" rx="8" fill="url(#screenBlue)"/>
+    <g clip-path="url(#leftScreenClip)">
+      <path d="M522 257L356 421H522V257Z" fill="#FFFFFF" opacity="0.12"/>
+    </g>
+    <path d="M222 421H558V442C558 457 546 469 531 469H249C234 469 222 457 222 442V421Z" fill="url(#bottomBar)"/>
+    <circle cx="509" cy="443" r="9" fill="#45D66E"/>
+    <path d="M353 469H437L444 542H346L353 469Z" fill="url(#metal)"/>
+    <rect x="313" y="527" width="168" height="28" rx="14" fill="#F7FAFD"/>
+  </g>
+
+  <!-- Network node -->
+  <g filter="url(#nodeShadow)">
+    <rect x="347" y="723" width="67" height="67" rx="13" fill="url(#nodeGrad)"/>
+  </g>
+
+  <!-- Right computer -->
+  <g filter="url(#objectShadow)">
+    <rect x="528" y="526" width="306" height="225" rx="25" fill="url(#whiteShellRight)"/>
+    <rect x="562" y="559" width="238" height="148" rx="8" fill="url(#screenTeal)"/>
+    <g clip-path="url(#rightScreenClip)">
+      <path d="M800 559L671 707H800V559Z" fill="#FFFFFF" opacity="0.11"/>
+    </g>
+    <path d="M528 707H834V726C834 740 823 751 809 751H553C539 751 528 740 528 726V707Z" fill="url(#bottomBarRight)"/>
+    <circle cx="780" cy="731" r="8" fill="#15C978"/>
+    <path d="M638 751H714L724 820H628L638 751Z" fill="url(#metalRight)"/>
+    <rect x="604" y="804" width="150" height="28" rx="14" fill="#F7FAFD"/>
+  </g>
+</svg>
