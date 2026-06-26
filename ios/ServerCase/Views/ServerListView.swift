@@ -82,3 +82,123 @@ struct ServerListView: View {
         .serverRowActions(server, model: model, editing: $editing)
     }
 }
+
+private struct GroupSection: Identifiable {
+    let id: String
+    let name: String
+    let servers: [ServerConfig]
+}
+
+private enum ServerListLayout {
+    static func filtered(_ servers: [ServerConfig], query: String) -> [ServerConfig] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return servers }
+
+        return servers.filter { server in
+            server.name.localizedStandardContains(trimmed) ||
+            server.host.localizedStandardContains(trimmed) ||
+            server.username.localizedStandardContains(trimmed)
+        }
+    }
+
+    static func sections(_ servers: [ServerConfig], groups: [ServerGroup]) -> [GroupSection] {
+        let namedSections = groups.compactMap { group -> GroupSection? in
+            let groupedServers = servers.filter { $0.groupId == group.id }
+            guard !groupedServers.isEmpty else { return nil }
+            return GroupSection(id: group.id, name: group.name, servers: groupedServers)
+        }
+
+        let ungroupedServers = servers.filter { server in
+            guard let groupId = server.groupId else { return true }
+            return !groups.contains { $0.id == groupId }
+        }
+
+        if ungroupedServers.isEmpty {
+            return namedSections
+        }
+
+        return namedSections + [
+            GroupSection(id: "__ungrouped__", name: "Ungrouped", servers: ungroupedServers)
+        ]
+    }
+}
+
+private struct ServerRow: View {
+    @EnvironmentObject private var model: AppModel
+    let server: ServerConfig
+
+    var body: some View {
+        HStack(spacing: 12) {
+            StatusDot(state: model.state(server.id))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(server.name)
+                    .font(.headline)
+                Text("\(server.username)@\(server.host):\(server.port)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text(model.state(server.id).label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct ServerRowActionsModifier: ViewModifier {
+    let server: ServerConfig
+    let model: AppModel
+    @Binding var editing: ServerConfig?
+
+    func body(content: Content) -> some View {
+        content
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    model.delete(server)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+
+                Button {
+                    editing = server
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .tint(Palette.accent)
+            }
+            .contextMenu {
+                Button {
+                    editing = server
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+
+                Button {
+                    model.reconnect(server)
+                } label: {
+                    Label("Reconnect", systemImage: "arrow.clockwise")
+                }
+
+                Button(role: .destructive) {
+                    model.delete(server)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+    }
+}
+
+private extension View {
+    func serverRowActions(
+        _ server: ServerConfig,
+        model: AppModel,
+        editing: Binding<ServerConfig?>
+    ) -> some View {
+        modifier(ServerRowActionsModifier(server: server, model: model, editing: editing))
+    }
+}
