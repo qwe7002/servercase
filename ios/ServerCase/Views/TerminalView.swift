@@ -72,8 +72,13 @@ private final class HardwareAwareTerminalView: SwiftTerm.TerminalView {
         }
     }
 
+    // SwiftTerm overrides `inputAccessoryView` as read/write (backed by its
+    // `_inputAccessory`), so this override must stay read/write too — Swift
+    // forbids narrowing a settable property to get-only. The getter simply
+    // hides the accessory while a hardware keyboard is attached.
     override var inputAccessoryView: UIView? {
-        hardwareKeyboardConnected ? nil : super.inputAccessoryView
+        get { hardwareKeyboardConnected ? nil : super.inputAccessoryView }
+        set { super.inputAccessoryView = newValue }
     }
 
     func startMonitoringHardwareKeyboard() {
