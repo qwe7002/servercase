@@ -26,7 +26,19 @@ interface Connection {
   banner?: string;
   /** Login message read from the remote host, shown when a shell opens. */
   motd?: Promise<string>;
+  publicIpv4?: string | null;
+  publicIpv6?: string | null;
+  /** Epoch ms of the last public-IP refresh (throttles the lookup). */
+  publicIpAt?: number;
 }
+
+/** Looks up the server's public addresses from the internet. */
+const PUBLIC_IP_COMMAND = [
+  'echo "===v4==="; curl -4 -fsS --max-time 4 https://api.ipify.org 2>/dev/null',
+  'echo "===v6==="; curl -6 -fsS --max-time 4 https://api6.ipify.org 2>/dev/null',
+].join('; ');
+
+const PUBLIC_IP_TTL_MS = 5 * 60_000;
 
 export type ConnectionStateListener = (
   serverId: string,
@@ -148,7 +160,11 @@ export class SshManager {
           })
           .on('close', () => {
             try {
-              resolve(parseStatus(out, conn.collector));
+              const status = parseStatus(out, conn.collector);
+              status.publicIpv4 = conn.publicIpv4 ?? null;
+              status.publicIpv6 = conn.publicIpv6 ?? null;
+              this.maybeRefreshPublicIp(serverId, conn);
+              resolve(status);
             } catch (e) {
               reject(e as Error);
             }
@@ -156,6 +172,19 @@ export class SshManager {
         stream.stderr.resume();
       });
     });
+  }
+
+  /** Refreshes the cached public IPs in the background when they go stale. */
+  private maybeRefreshPublicIp(serverId: string, conn: Connection): void {
+    const now = Date.now();
+    if (conn.publicIpAt && now - conn.publicIpAt < PUBLIC_IP_TTL_MS) return;
+    conn.publicIpAt = now;
+    void this.execCommand(serverId, PUBLIC_IP_COMMAND)
+      .then(({ stdout }) => {
+        conn.publicIpv4 = pickLine(stdout, 'v4');
+        conn.publicIpv6 = pickLine(stdout, 'v6');
+      })
+      .catch(() => undefined);
   }
 
   async openShell(
@@ -364,6 +393,16 @@ const S_IFMT = 0o170000;
 const S_IFDIR = 0o040000;
 const S_IFLNK = 0o120000;
 const S_IFREG = 0o100000;
+
+/** Extracts the value under a `===name===` section, or null if empty/absent. */
+function pickLine(out: string, name: string): string | null {
+  const start = out.indexOf(`===${name}===`);
+  if (start === -1) return null;
+  const from = out.indexOf('\n', start) + 1;
+  const next = out.indexOf('===', from);
+  const value = out.slice(from, next === -1 ? undefined : next).trim();
+  return value || null;
+}
 
 function toEntry(dir: string, it: FileEntry): SftpEntry {
   const attrs = it.attrs;

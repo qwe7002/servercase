@@ -39,6 +39,12 @@ export interface ServerStatus {
   /** Bytes/sec since previous sample, or null until a second sample. */
   netRxBytesPerSec: number | null;
   netTxBytesPerSec: number | null;
+  /** Local NIC addresses as "iface address" (scope-global only). */
+  ipv4: string[];
+  ipv6: string[];
+  /** Public addresses as seen from the internet, or null if unavailable. */
+  publicIpv4: string | null;
+  publicIpv6: string | null;
   uptimeSec: number;
   loadAvg: [number, number, number];
   hostname: string;
