@@ -39,11 +39,19 @@ data class BitwardenSettings(
     val itemPrefix: String = "ServerCase/",
 )
 
+/** A named group/folder used to organize the server list. */
+@Serializable
+data class ServerGroup(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+)
+
 @Serializable
 data class GlobalSettings(
     val bitwarden: BitwardenSettings = BitwardenSettings(),
     val snippets: List<Snippet> = emptyList(),
     val autoSync: AutoSyncSettings = AutoSyncSettings(),
+    val groups: List<ServerGroup> = emptyList(),
 )
 
 /**

@@ -2,6 +2,7 @@ package com.servercase.app.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,17 +16,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,20 +73,42 @@ fun ServerListScreen(
             }
         },
     ) { padding ->
-        if (state.servers.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(
-                    "No servers yet. Tap + to add one.",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
+        var query by remember { mutableStateOf("") }
+        var groupsView by remember { mutableStateOf(false) }
+
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (state.servers.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No servers yet. Tap + to add one.",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                return@Column
             }
-        } else {
-            val grouped = linkedMapOf<String, MutableList<ServerConfig>>()
-            state.servers.forEach { s ->
-                val g = s.group?.trim().takeUnless { it.isNullOrEmpty() } ?: ""
-                grouped.getOrPut(g) { mutableListOf() }.add(s)
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search servers") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(selected = !groupsView, onClick = { groupsView = false }, label = { Text("All") })
+                FilterChip(selected = groupsView, onClick = { groupsView = true }, label = { Text("Groups") })
             }
-            val hasGroups = grouped.keys.any { it.isNotEmpty() }
+
+            val q = query.trim().lowercase()
+            val filtered = if (q.isEmpty()) state.servers else state.servers.filter {
+                it.name.lowercase().contains(q) ||
+                    it.host.lowercase().contains(q) ||
+                    it.username.lowercase().contains(q)
+            }
 
             @Composable
             fun row(server: ServerConfig) = ServerRow(
@@ -89,14 +119,35 @@ fun ServerListScreen(
                 onDelete = { onDelete(server) },
             )
 
-            LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-                if (hasGroups) {
-                    grouped.forEach { (group, servers) ->
-                        item(key = "header_$group") { GroupHeader(group.ifEmpty { "Ungrouped" }) }
-                        items(servers, key = { it.id }) { server -> row(server) }
+            if (filtered.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No servers match \"$query\".",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+                return@Column
+            }
+
+            val showGroups = groupsView && q.isEmpty()
+            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                if (showGroups) {
+                    state.settings.groups.forEach { group ->
+                        val groupServers = filtered.filter { it.groupId == group.id }
+                        if (groupServers.isNotEmpty()) {
+                            item(key = "h_${group.id}") { GroupHeader(group.name) }
+                            items(groupServers, key = { it.id }) { server -> row(server) }
+                        }
+                    }
+                    val ungrouped = filtered.filter { s ->
+                        s.groupId == null || state.settings.groups.none { it.id == s.groupId }
+                    }
+                    if (ungrouped.isNotEmpty()) {
+                        item(key = "h_ungrouped") { GroupHeader("Ungrouped") }
+                        items(ungrouped, key = { it.id }) { server -> row(server) }
                     }
                 } else {
-                    items(state.servers, key = { it.id }) { server -> row(server) }
+                    items(filtered, key = { it.id }) { server -> row(server) }
                 }
             }
         }

@@ -7,6 +7,13 @@ struct Snippet: Identifiable, Codable, Equatable, Hashable {
     var command: String
 }
 
+/// A named group/folder used to organize the server list.
+/// (Named `ServerGroup` to avoid clashing with SwiftUI's `Group` view.)
+struct ServerGroup: Identifiable, Codable, Equatable, Hashable {
+    var id: String = UUID().uuidString
+    var name: String
+}
+
 /// Periodic export/import of the configuration to a JSON file.
 struct AutoSyncSettings: Codable, Equatable {
     var enabled: Bool = false
@@ -37,6 +44,7 @@ struct GlobalSettings: Codable, Equatable {
     var bitwarden = BitwardenSettings()
     var snippets: [Snippet] = []
     var autoSync = AutoSyncSettings()
+    var groups: [ServerGroup] = []
 }
 
 /// The login credentials for a server. Stored in Bitwarden when the vault is

@@ -21,6 +21,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 bitwardenSection
+                groupsSection
                 snippetsSection
                 autoSyncSection
                 if let message {
@@ -112,6 +113,25 @@ struct SettingsView: View {
             }
         }
         .font(.footnote)
+    }
+
+    // MARK: Groups
+
+    @ViewBuilder private var groupsSection: some View {
+        Section {
+            ForEach($draft.groups) { $group in
+                TextField("Name", text: $group.name)
+                    .autocorrectionDisabled()
+            }
+            .onDelete { draft.groups.remove(atOffsets: $0) }
+            Button { draft.groups.append(ServerGroup(name: "New group")) } label: {
+                Label("Add group", systemImage: "plus")
+            }
+        } header: {
+            Text("Groups")
+        } footer: {
+            Text("Assign servers to a group from the server form. Deleting a group leaves its servers ungrouped.")
+        }
     }
 
     // MARK: Snippets

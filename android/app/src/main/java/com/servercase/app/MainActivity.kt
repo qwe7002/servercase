@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                         val id = entry.arguments?.getString("id")
                         ServerFormScreen(
                             existing = id?.let { arg -> state.servers.find { it.id == arg } },
+                            groups = state.settings.groups,
                             onSave = { vm.upsert(it); nav.popBackStack() },
                             onBack = { nav.popBackStack() },
                         )

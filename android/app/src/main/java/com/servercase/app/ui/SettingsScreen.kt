@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.servercase.app.data.BitwardenSettings
 import com.servercase.app.data.GlobalSettings
+import com.servercase.app.data.ServerGroup
 import com.servercase.app.data.Snippet
 import com.servercase.app.data.bitwarden.BitwardenLockState
 import com.servercase.app.vm.UiState
@@ -87,6 +88,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             BitwardenSection(state, onUpdateSettings, onUnlock, onLock, onPushAll, onTest, onRefreshBitwarden)
+            GroupsSection(settings, onUpdateSettings)
             SnippetsSection(settings, onUpdateSettings)
             AutoSyncSection(settings, onUpdateSettings, onSyncNow, onExport, onImport)
             state.settingsMessage?.let {
@@ -286,6 +288,37 @@ private fun SnippetDialog(existing: Snippet?, onDismiss: () -> Unit, onSave: (Sn
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun GroupsSection(settings: GlobalSettings, onUpdate: (GlobalSettings) -> Unit) {
+    SectionCard("Groups") {
+        Text(
+            "Assign servers to a group from the server form. Deleting a group leaves its servers ungrouped.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        settings.groups.forEach { group ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = group.name,
+                    onValueChange = { name ->
+                        onUpdate(settings.copy(groups = settings.groups.map {
+                            if (it.id == group.id) it.copy(name = name) else it
+                        }))
+                    },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = {
+                    onUpdate(settings.copy(groups = settings.groups.filterNot { it.id == group.id }))
+                }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+            }
+        }
+        OutlinedButton(onClick = {
+            onUpdate(settings.copy(groups = settings.groups + ServerGroup(name = "New group")))
+        }) { Text("Add group") }
+    }
 }
 
 @Composable
