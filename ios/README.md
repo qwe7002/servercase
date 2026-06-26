@@ -13,6 +13,9 @@ over SwiftNIO).
   snippet menu
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download) over the live connection
+- **Adaptive layout** — a single navigation stack on iPhone and a
+  sidebar + detail split view on iPad (`NavigationSplitView`), which also
+  unlocks landscape on iPad
 - **Global settings** (gear in the server list):
   - **Keychain (Bitwarden)** — credentials are stored in your Bitwarden vault,
     reached directly over the Bitwarden REST API with a clean-room crypto
@@ -42,7 +45,11 @@ Services/
   ServerStore.swift       UserDefaults persistence
   AppModel.swift          @MainActor ObservableObject: state, vault, polling
 Views/
-  ServerListView / ServerFormView / DashboardView / TerminalView
+  RootView.swift          picks the layout by horizontal size class
+  ServerListView          iPhone navigation-stack list
+  ServerSplitView         iPad sidebar + detail (NavigationSplitView)
+  ServerListSupport.swift shared filtering/grouping + ServerRow + row actions
+  ServerFormView / DashboardView / TerminalView
   SettingsView / FilesView
   Components/Indicators.swift  GaugeView + UsageBarView + StatusDot
   Format.swift            byte/rate/uptime formatting + palette
