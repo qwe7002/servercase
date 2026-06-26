@@ -3,6 +3,7 @@ import type { ServerConfig } from '../electron/shared';
 import { useServers } from './store/servers';
 import { useConnections } from './useConnections';
 import { useGlobalSettings } from './useGlobalSettings';
+import { useBridge } from './useBridge';
 import { ServerList } from './components/ServerList';
 import { ServerForm } from './components/ServerForm';
 import { Dashboard } from './components/Dashboard';
@@ -11,6 +12,7 @@ import { Settings } from './components/Settings';
 export function App() {
   useConnections();
   useGlobalSettings();
+  useBridge();
   const servers = useServers((s) => s.servers);
   const selectedId = useServers((s) => s.selectedId);
   const selected = servers.find((s) => s.id === selectedId);

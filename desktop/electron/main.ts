@@ -3,9 +3,11 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { SshManager } from './ssh/sshManager.js';
 import { BitwardenVault } from './bitwarden.js';
+import { Bridge } from './bridge.js';
 import {
   IpcChannels,
   type BitwardenSettings,
+  type BridgeServerEntry,
   type ServerConfig,
   type ServerSecrets,
   type SyncPayload,
@@ -26,6 +28,10 @@ const ssh = new SshManager(
 );
 
 const bitwarden = new BitwardenVault();
+
+const bridge = new Bridge(ssh, (serverId) =>
+  send(IpcChannels.bridgeConnectRequest, serverId),
+);
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -94,6 +100,17 @@ function registerIpc(): void {
   ipcMain.handle(IpcChannels.bwLock, () => bitwarden.lock());
   ipcMain.handle(IpcChannels.bwSync, () => bitwarden.sync());
   ipcMain.handle(IpcChannels.bwTest, () => bitwarden.test());
+
+  // ── Control bridge (for the MCP server) ───────────────────────────────────
+  ipcMain.handle(IpcChannels.bridgeInfo, () => bridge.info());
+  ipcMain.handle(
+    IpcChannels.bridgeSetEnabled,
+    (_e, enabled: boolean, port: number) => bridge.setEnabled(enabled, port),
+  );
+  ipcMain.handle(
+    IpcChannels.bridgeRegister,
+    (_e, entries: BridgeServerEntry[]) => bridge.setRegistry(entries),
+  );
   ipcMain.handle(
     IpcChannels.bwSet,
     (_e, serverId: string, secrets: ServerSecrets) =>
@@ -204,7 +221,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   ssh.dispose();
+  void bridge.dispose();
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => ssh.dispose());
+app.on('before-quit', () => {
+  ssh.dispose();
+  void bridge.dispose();
+});

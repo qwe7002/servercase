@@ -12,9 +12,11 @@ standalone, idiomatic implementation for its platform that shares the
 | MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
 
 The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
-server that exposes the same SSH operations (run command, status, SFTP) as
-tools, so an AI assistant can manage your servers. It is config-file driven and
-supports a read-only mode — see its [README](mcp/README.md).
+server that lets an AI assistant manage your servers (run command, status,
+SFTP). It is a thin proxy to the desktop app's local control bridge: **login,
+credentials and the Bitwarden vault stay in ServerCase** — the MCP server holds
+only a URL and token and never sees secrets. Enable it under **Settings → AI**;
+a read-only mode is available. See its [README](mcp/README.md).
 
 ## Shared design
 

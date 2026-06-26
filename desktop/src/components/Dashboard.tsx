@@ -10,7 +10,7 @@ import {
 import { Gauge, UsageBar } from './StatusCard';
 import { Terminal } from './Terminal';
 import { Sftp } from './Sftp';
-import { useSettings } from '../store/settings';
+import { connectServer } from '../lib/connect';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,26 +33,15 @@ export function Dashboard({ server }: Props) {
   const status = useServers((s) => s.status[server.id]);
   const lastError = useServers((s) => s.lastError[server.id]);
   const setConnState = useServers((s) => s.setConnState);
-  const vaultEnabled = useSettings((s) => s.settings.bitwarden.enabled);
   const [tab, setTab] = useState<Tab>('overview');
   const [busy, setBusy] = useState(false);
 
   const connect = async () => {
-    const api = window.servercase;
-    if (!api) return;
     setBusy(true);
-    setConnState(server.id, 'connecting');
     try {
-      // With the Bitwarden vault, secrets live there rather than on the
-      // server object; fetch them on demand if they are missing.
-      let cfg = server;
-      if (vaultEnabled && !server.password && !server.privateKey) {
-        const secrets = await api.bw.get(server.id);
-        if (secrets) cfg = { ...server, ...secrets };
-      }
-      await api.connect(cfg);
-    } catch (e) {
-      setConnState(server.id, 'error', (e as Error).message);
+      await connectServer(server);
+    } catch {
+      // Error state is already set by connectServer.
     } finally {
       setBusy(false);
     }

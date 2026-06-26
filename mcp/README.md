@@ -1,59 +1,63 @@
 # ServerCase — SSH MCP server
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that lets an
-AI assistant manage Linux servers over SSH, using the same connection model as
-the ServerCase clients. It speaks MCP over stdio and drives
-[`ssh2`](https://github.com/mscdex/ssh2) under the hood.
+AI assistant manage Linux servers over SSH **through the ServerCase app**.
 
-> ⚠️ This gives an AI shell and file access to whatever servers you configure.
-> Only point it at servers you are authorized to manage, keep the config file
-> private, and consider `readOnly` mode for inspection-only use.
+It is a thin proxy: it holds only the URL and token of the ServerCase *control
+bridge*. **ServerCase owns login** — the server list, credential storage and
+the Bitwarden vault all stay in the app, and the actual SSH sockets live there
+too. The MCP server never sees a password, private key or vault. It simply asks
+ServerCase to act on connections you have authenticated.
+
+```
+AI client ──MCP/stdio──> servercase-mcp ──HTTP(127.0.0.1 + token)──> ServerCase app ──SSH──> servers
+                          (no secrets)                                (login + Bitwarden)
+```
+
+> ⚠️ While enabled, the bridge lets an AI run commands and modify files on your
+> connected servers. Keep the token private and consider read-only mode.
+
+## Setup
+
+1. In **ServerCase → Settings → AI**, enable *Let an AI control SSH* and copy
+   the **Bridge URL** and **Token** (the token is regenerated on each app
+   start).
+2. Build this package and point it at the bridge:
+
+```bash
+npm install
+npm run build
+SERVERCASE_MCP_URL=http://127.0.0.1:8765 \
+SERVERCASE_MCP_TOKEN=<token> \
+  node dist/index.js
+```
+
+Config is read from CLI args / env:
+
+| Option | Env | Default |
+|--------|-----|---------|
+| `--url <url>` | `SERVERCASE_MCP_URL` | `http://127.0.0.1:8765` |
+| `--token <token>` | `SERVERCASE_MCP_TOKEN` | *(required)* |
+| `--read-only` | `SERVERCASE_MCP_READONLY=1` | off |
 
 ## Tools
 
 | Tool | Mutating | Description |
 |------|----------|-------------|
-| `list_servers` | – | List configured servers (no secrets). |
-| `run_command` | ✓ | Run a shell command; returns stdout, stderr, exit code. |
-| `server_status` | – | CPU/mem/disk/net/uptime snapshot from `/proc` + `df`. |
+| `list_servers` | – | List servers and their connection state. |
+| `connect` | – | Ask ServerCase to connect (it does the login). |
+| `run_command` | ✓ | Run a shell command; returns stdout/stderr/exit code. |
+| `server_status` | – | Parsed CPU/mem/disk/net/uptime snapshot. |
 | `sftp_list` | – | List a remote directory. |
 | `sftp_read` | – | Read a remote text file. |
 | `sftp_write` | ✓ | Overwrite a remote text file. |
 | `sftp_mkdir` | ✓ | Create a remote directory. |
 | `sftp_remove` | ✓ | Delete a remote file or directory. |
-| `disconnect` | – | Close a server's SSH connection. |
 
-In `readOnly` mode the mutating tools are rejected.
-
-## Configure
-
-Create a JSON config (see `servercase-mcp.config.example.json`):
-
-```json
-{
-  "readOnly": false,
-  "servers": [
-    { "id": "web1", "name": "Web 1", "host": "10.0.0.10", "username": "root", "password": "…" },
-    { "id": "db1",  "name": "Database", "host": "10.0.0.20", "username": "admin",
-      "privateKeyPath": "/home/you/.ssh/id_ed25519", "passphrase": "…" }
-  ]
-}
-```
-
-The config path is resolved from `--config <path>`, then
-`SERVERCASE_MCP_CONFIG`, then `./servercase-mcp.config.json`.
-
-## Build & run
-
-```bash
-npm install
-npm run build           # tsc → dist/
-node dist/index.js --config /path/to/servercase-mcp.config.json
-```
+In read-only mode the mutating tools are rejected. Commands and file ops only
+work on **connected** servers — use `connect` (or connect in the app) first.
 
 ## Register with an MCP client
-
-For Claude Code / Claude Desktop, add to the MCP server list:
 
 ```json
 {
@@ -61,10 +65,11 @@ For Claude Code / Claude Desktop, add to the MCP server list:
     "servercase-ssh": {
       "command": "node",
       "args": ["/abs/path/to/servercase/mcp/dist/index.js"],
-      "env": { "SERVERCASE_MCP_CONFIG": "/abs/path/to/servercase-mcp.config.json" }
+      "env": {
+        "SERVERCASE_MCP_URL": "http://127.0.0.1:8765",
+        "SERVERCASE_MCP_TOKEN": "<token from ServerCase>"
+      }
     }
   }
 }
 ```
-
-Tools are referenced by server `id` (falling back to `name`).

@@ -103,10 +103,41 @@ export interface BitwardenSettings {
   itemPrefix: string;
 }
 
+/**
+ * Local control bridge: a loopback HTTP endpoint that lets an external MCP
+ * server drive the SSH connections ServerCase has already authenticated. The
+ * bridge never exposes credentials or the Bitwarden vault — login stays in
+ * ServerCase.
+ */
+export interface BridgeSettings {
+  enabled: boolean;
+  /** Loopback port to listen on. */
+  port: number;
+}
+
 export interface GlobalSettings {
   bitwarden: BitwardenSettings;
   snippets: Snippet[];
   autoSync: AutoSyncSettings;
+  bridge: BridgeSettings;
+}
+
+/** Runtime status of the control bridge, surfaced to the Settings UI. */
+export interface BridgeInfo {
+  running: boolean;
+  port: number;
+  /** Bearer token the MCP server must present. Regenerated per session. */
+  token: string;
+  /** Convenience base URL, e.g. http://127.0.0.1:8765 */
+  url: string;
+  error?: string;
+}
+
+/** A server entry the renderer registers with the bridge (no secrets). */
+export interface BridgeServerEntry {
+  id: string;
+  name: string;
+  host: string;
 }
 
 /**
@@ -191,6 +222,11 @@ export const IpcChannels = {
   syncExport: 'sc:sync:export',
   syncImport: 'sc:sync:import',
   syncPickFile: 'sc:sync:pickFile',
+  // control bridge (for the MCP server)
+  bridgeInfo: 'sc:bridge:info',
+  bridgeSetEnabled: 'sc:bridge:setEnabled',
+  bridgeRegister: 'sc:bridge:register',
+  bridgeConnectRequest: 'sc:bridge:connectRequest',
   // sftp
   sftpList: 'sc:sftp:list',
   sftpReadText: 'sc:sftp:readText',

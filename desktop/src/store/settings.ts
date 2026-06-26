@@ -26,6 +26,10 @@ const DEFAULTS: GlobalSettings = {
     intervalMinutes: 30,
     filePath: '',
   },
+  bridge: {
+    enabled: false,
+    port: 8765,
+  },
 };
 
 interface SettingsState {
@@ -33,6 +37,7 @@ interface SettingsState {
 
   setBitwarden: (patch: Partial<BitwardenSettings>) => void;
   setAutoSync: (patch: Partial<AutoSyncSettings>) => void;
+  setBridge: (patch: Partial<GlobalSettings['bridge']>) => void;
 
   addSnippet: (s: Omit<Snippet, 'id'>) => void;
   updateSnippet: (s: Snippet) => void;
@@ -59,6 +64,13 @@ export const useSettings = create<SettingsState>()(
           settings: {
             ...s.settings,
             autoSync: { ...s.settings.autoSync, ...patch },
+          },
+        })),
+      setBridge: (patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            bridge: { ...s.settings.bridge, ...patch },
           },
         })),
 

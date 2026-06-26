@@ -3,12 +3,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { loadConfig } from './config.js';
-import { SshPool, STATUS_COMMAND } from './ssh.js';
+import { BridgeClient } from './bridge.js';
 
 const config = loadConfig(process.argv.slice(2));
-const pool = new SshPool(config.servers);
+const bridge = new BridgeClient(config.url, config.token);
 
-const server = new McpServer({ name: 'servercase-ssh', version: '0.1.0' });
+const server = new McpServer({ name: 'servercase-ssh', version: '0.2.0' });
 
 const text = (s: string) => ({ content: [{ type: 'text' as const, text: s }] });
 const fail = (s: string) => ({
@@ -16,7 +16,6 @@ const fail = (s: string) => ({
   isError: true,
 });
 
-/** Wraps a tool handler with error handling and the read-only guard. */
 function tool<T>(
   mutating: boolean,
   handler: (args: T) => Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>,
@@ -33,23 +32,28 @@ function tool<T>(
   };
 }
 
+const json = (v: unknown) => text(JSON.stringify(v, null, 2));
+
 server.registerTool(
   'list_servers',
   {
     title: 'List servers',
-    description: 'List the SSH servers available to this MCP server (no secrets).',
+    description:
+      'List the servers ServerCase knows about and whether each is currently connected.',
     inputSchema: {},
   },
-  tool(false, async () => {
-    const rows = pool.list().map((s) => ({
-      id: s.id ?? s.name,
-      name: s.name,
-      host: s.host,
-      port: s.port ?? 22,
-      username: s.username,
-    }));
-    return text(JSON.stringify(rows, null, 2));
-  }),
+  tool(false, async () => json((await bridge.listServers()).servers)),
+);
+
+server.registerTool(
+  'connect',
+  {
+    title: 'Connect',
+    description:
+      'Ask ServerCase to open an SSH connection to a server. ServerCase performs the login (resolving credentials from its keychain); this tool never sees secrets.',
+    inputSchema: { server: z.string().describe('Server id or name') },
+  },
+  tool<{ server: string }>(false, async ({ server }) => json(await bridge.connect(server))),
 );
 
 server.registerTool(
@@ -57,7 +61,7 @@ server.registerTool(
   {
     title: 'Run command',
     description:
-      'Run a shell command on a server over SSH and return stdout, stderr and the exit code.',
+      'Run a shell command on a connected server and return stdout, stderr and exit code. Connect the server first if needed.',
     inputSchema: {
       server: z.string().describe('Server id or name'),
       command: z.string().describe('Shell command to execute'),
@@ -65,10 +69,10 @@ server.registerTool(
     annotations: { destructiveHint: true },
   },
   tool<{ server: string; command: string }>(true, async ({ server, command }) => {
-    const r = await pool.exec(server, command);
+    const r = await bridge.exec(server, command);
     const parts = [`exit code: ${r.code ?? 'unknown'}`];
-    if (r.stdout) parts.push(`--- stdout ---\n${r.stdout.trimEnd()}`);
-    if (r.stderr) parts.push(`--- stderr ---\n${r.stderr.trimEnd()}`);
+    if (r.stdout) parts.push(`--- stdout ---\n${String(r.stdout).trimEnd()}`);
+    if (r.stderr) parts.push(`--- stderr ---\n${String(r.stderr).trimEnd()}`);
     return { content: [{ type: 'text', text: parts.join('\n') }], isError: r.code !== 0 };
   }),
 );
@@ -77,49 +81,44 @@ server.registerTool(
   'server_status',
   {
     title: 'Server status',
-    description:
-      'Collect a system status snapshot (CPU/mem/disk/net/uptime) from /proc + df, returned as raw text.',
+    description: 'Get a parsed system status snapshot (CPU/mem/disk/net/uptime) for a connected server.',
     inputSchema: { server: z.string().describe('Server id or name') },
   },
-  tool<{ server: string }>(false, async ({ server }) => {
-    const r = await pool.exec(server, STATUS_COMMAND);
-    return text(r.stdout || r.stderr || '(no output)');
-  }),
+  tool<{ server: string }>(false, async ({ server }) => json(await bridge.status(server))),
 );
 
 server.registerTool(
   'sftp_list',
   {
     title: 'List directory',
-    description: 'List a directory on a server over SFTP.',
+    description: 'List a directory on a connected server over SFTP.',
     inputSchema: {
       server: z.string(),
       path: z.string().default('.').describe('Remote directory path'),
     },
   },
-  tool<{ server: string; path: string }>(false, async ({ server, path: dir }) => {
-    const r = await pool.sftpList(server, dir);
-    return text(JSON.stringify(r, null, 2));
-  }),
+  tool<{ server: string; path: string }>(false, async ({ server, path }) =>
+    json(await bridge.sftpList(server, path)),
+  ),
 );
 
 server.registerTool(
   'sftp_read',
   {
     title: 'Read file',
-    description: 'Read a text file on a server over SFTP.',
+    description: 'Read a text file on a connected server over SFTP.',
     inputSchema: { server: z.string(), path: z.string().describe('Remote file path') },
   },
-  tool<{ server: string; path: string }>(false, async ({ server, path: file }) => {
-    return text(await pool.sftpRead(server, file));
-  }),
+  tool<{ server: string; path: string }>(false, async ({ server, path }) =>
+    text((await bridge.sftpRead(server, path)).content ?? ''),
+  ),
 );
 
 server.registerTool(
   'sftp_write',
   {
     title: 'Write file',
-    description: 'Write (overwrite) a text file on a server over SFTP.',
+    description: 'Write (overwrite) a text file on a connected server over SFTP.',
     inputSchema: {
       server: z.string(),
       path: z.string().describe('Remote file path'),
@@ -129,9 +128,9 @@ server.registerTool(
   },
   tool<{ server: string; path: string; content: string }>(
     true,
-    async ({ server, path: file, content }) => {
-      await pool.sftpWrite(server, file, content);
-      return text(`Wrote ${content.length} bytes to ${file}.`);
+    async ({ server, path, content }) => {
+      await bridge.sftpWrite(server, path, content);
+      return text(`Wrote ${content.length} bytes to ${path}.`);
     },
   ),
 );
@@ -140,12 +139,12 @@ server.registerTool(
   'sftp_mkdir',
   {
     title: 'Make directory',
-    description: 'Create a directory on a server over SFTP.',
+    description: 'Create a directory on a connected server over SFTP.',
     inputSchema: { server: z.string(), path: z.string().describe('Remote directory path') },
   },
-  tool<{ server: string; path: string }>(true, async ({ server, path: dir }) => {
-    await pool.sftpMkdir(server, dir);
-    return text(`Created ${dir}.`);
+  tool<{ server: string; path: string }>(true, async ({ server, path }) => {
+    await bridge.sftpMkdir(server, path);
+    return text(`Created ${path}.`);
   }),
 );
 
@@ -153,7 +152,7 @@ server.registerTool(
   'sftp_remove',
   {
     title: 'Remove path',
-    description: 'Delete a file or directory on a server over SFTP.',
+    description: 'Delete a file or directory on a connected server over SFTP.',
     inputSchema: {
       server: z.string(),
       path: z.string().describe('Remote path to delete'),
@@ -163,36 +162,14 @@ server.registerTool(
   },
   tool<{ server: string; path: string; directory: boolean }>(
     true,
-    async ({ server, path: target, directory }) => {
-      await pool.sftpRemove(server, target, directory);
-      return text(`Deleted ${target}.`);
+    async ({ server, path, directory }) => {
+      await bridge.sftpRemove(server, path, directory);
+      return text(`Deleted ${path}.`);
     },
   ),
 );
 
-server.registerTool(
-  'disconnect',
-  {
-    title: 'Disconnect',
-    description: 'Close the SSH connection to a server (it reconnects on next use).',
-    inputSchema: { server: z.string() },
-  },
-  tool<{ server: string }>(false, async ({ server }) => {
-    pool.disconnect(server);
-    return text(`Disconnected ${server}.`);
-  }),
-);
-
-process.on('SIGINT', () => {
-  pool.disposeAll();
-  process.exit(0);
-});
-process.on('SIGTERM', () => {
-  pool.disposeAll();
-  process.exit(0);
-});
-
 await server.connect(new StdioServerTransport());
 console.error(
-  `servercase-ssh MCP server ready — ${config.servers.length} server(s)${config.readOnly ? ', read-only' : ''}.`,
+  `servercase-ssh MCP server ready — proxying ${config.url}${config.readOnly ? ' (read-only)' : ''}.`,
 );

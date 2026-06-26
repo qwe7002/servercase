@@ -22,6 +22,10 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
     snippet menu.
   - **Auto-sync** — periodically export the server list and settings to a JSON
     file (secrets excluded), with manual *Sync now* / *Restore* actions.
+  - **AI control (MCP bridge)** — a loopback, token-protected endpoint that lets
+    the [`mcp/`](../mcp) server drive your *connected* servers (run commands,
+    status, SFTP). Login and secrets never leave the app; the bridge only acts
+    on connections you've authenticated.
 - Server definitions persisted locally (zustand `persist`)
 
 ### Bitwarden keychain (clean-room)

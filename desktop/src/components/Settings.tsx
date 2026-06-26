@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { BitwardenStatus, Snippet } from '../../electron/shared';
+import type { BitwardenStatus, BridgeInfo, Snippet } from '../../electron/shared';
 import { useSettings } from '../store/settings';
 import { useServers } from '../store/servers';
 import { runExport, runImport } from '../lib/sync';
@@ -19,6 +19,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import {
+  Bot,
+  Copy,
   KeyRound,
   Lock,
   Plus,
@@ -29,7 +31,7 @@ import {
   Unlock,
 } from 'lucide-react';
 
-type Section = 'bitwarden' | 'snippets' | 'sync';
+type Section = 'bitwarden' | 'snippets' | 'sync' | 'bridge';
 
 interface Props {
   onDone: () => void;
@@ -48,10 +50,11 @@ export function Settings({ onDone }: Props) {
         </DialogHeader>
 
         <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="bitwarden">Keychain</TabsTrigger>
             <TabsTrigger value="snippets">Snippets</TabsTrigger>
             <TabsTrigger value="sync">Auto-sync</TabsTrigger>
+            <TabsTrigger value="bridge">AI</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -59,6 +62,7 @@ export function Settings({ onDone }: Props) {
           {section === 'bitwarden' && <BitwardenSection />}
           {section === 'snippets' && <SnippetsSection />}
           {section === 'sync' && <SyncSection />}
+          {section === 'bridge' && <BridgeSection />}
         </div>
       </DialogContent>
     </Dialog>
@@ -542,6 +546,95 @@ function SyncSection() {
       </div>
 
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
+
+// ── AI control bridge (MCP) ────────────────────────────────────────────────
+
+function BridgeSection() {
+  const bridge = useSettings((s) => s.settings.bridge);
+  const setBridge = useSettings((s) => s.setBridge);
+  const [info, setInfo] = useState<BridgeInfo | null>(null);
+
+  const api = window.servercase;
+
+  useEffect(() => {
+    void (async () => {
+      if (api) setInfo(await api.bridge.info());
+    })();
+  }, [api, bridge.enabled, bridge.port]);
+
+  const copy = (value: string) => void navigator.clipboard?.writeText(value);
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <Bot className="size-4" /> Let an AI control SSH (MCP bridge)
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Exposes a local, token-protected endpoint so the ServerCase MCP
+            server can run commands, read status and browse files on connections
+            you have authenticated here. The bridge never sees your passwords,
+            keys or Bitwarden — login stays in ServerCase.
+          </p>
+        </div>
+        <Switch
+          checked={bridge.enabled}
+          onCheckedChange={(v) => setBridge({ enabled: v })}
+        />
+      </div>
+
+      {bridge.enabled && (
+        <>
+          <Separator />
+          <div className="grid w-40 gap-2">
+            <Label htmlFor="bridge-port">Port</Label>
+            <Input
+              id="bridge-port"
+              inputMode="numeric"
+              value={String(bridge.port)}
+              onChange={(e) =>
+                setBridge({ port: Number(e.target.value) || 8765 })
+              }
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Bridge URL</Label>
+            <div className="flex gap-2">
+              <Input readOnly value={info?.url ?? ''} className="font-mono text-xs" />
+              <Button variant="outline" onClick={() => copy(info?.url ?? '')}>
+                <Copy />
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Token</Label>
+            <div className="flex gap-2">
+              <Input
+                readOnly
+                type="password"
+                value={info?.token ?? ''}
+                className="font-mono text-xs"
+              />
+              <Button variant="outline" onClick={() => copy(info?.token ?? '')}>
+                <Copy />
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Status: {info?.running ? 'listening' : 'stopped'}. Point the MCP
+            server at this URL and token (<code>SERVERCASE_MCP_URL</code> /{' '}
+            <code>SERVERCASE_MCP_TOKEN</code>). The token is regenerated each
+            time the app restarts.
+          </p>
+        </>
+      )}
     </div>
   );
 }

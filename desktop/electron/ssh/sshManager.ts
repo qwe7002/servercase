@@ -55,6 +55,32 @@ export class SshManager {
     return this.conns.has(serverId);
   }
 
+  connectedIds(): string[] {
+    return [...this.conns.keys()];
+  }
+
+  /** Runs a command to completion, returning stdout, stderr and exit code. */
+  execCommand(
+    serverId: string,
+    command: string,
+  ): Promise<{ stdout: string; stderr: string; code: number | null }> {
+    const conn = this.conns.get(serverId);
+    if (!conn) return Promise.reject(new Error('not connected'));
+    return new Promise((resolve, reject) => {
+      conn.client.exec(command, (err, stream) => {
+        if (err) return reject(err);
+        let stdout = '';
+        let stderr = '';
+        let code: number | null = null;
+        stream
+          .on('data', (d: Buffer) => (stdout += d.toString('utf8')))
+          .on('exit', (c: number) => (code = c))
+          .on('close', () => resolve({ stdout, stderr, code }));
+        stream.stderr.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
+      });
+    });
+  }
+
   connect(cfg: ServerConfig): Promise<void> {
     if (this.conns.has(cfg.id)) return Promise.resolve();
     return new Promise((resolve, reject) => {
