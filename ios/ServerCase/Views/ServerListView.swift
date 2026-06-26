@@ -1,11 +1,7 @@
 import SwiftUI
 
-private struct GroupSection: Identifiable {
-    let id: String
-    let name: String
-    let servers: [ServerConfig]
-}
-
+/// Compact (iPhone) layout: a single navigation stack that pushes the dashboard
+/// for the tapped server. The iPad layout lives in `ServerSplitView`.
 struct ServerListView: View {
     @EnvironmentObject private var model: AppModel
     @State private var editing: ServerConfig?
@@ -23,7 +19,7 @@ struct ServerListView: View {
                         systemImage: "server.rack",
                         description: Text("Tap + to add your first server.")
                     )
-                } else if filteredServers.isEmpty {
+                } else if filtered.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 } else {
                     List {
@@ -34,7 +30,7 @@ struct ServerListView: View {
                                 }
                             }
                         } else {
-                            ForEach(filteredServers) { server in serverLink(server) }
+                            ForEach(filtered) { server in serverLink(server) }
                         }
                     }
                 }
@@ -64,33 +60,14 @@ struct ServerListView: View {
         }
     }
 
-    private var filteredServers: [ServerConfig] {
-        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return model.servers }
-        return model.servers.filter {
-            $0.name.lowercased().contains(q) ||
-            $0.host.lowercased().contains(q) ||
-            $0.username.lowercased().contains(q)
-        }
+    private var filtered: [ServerConfig] {
+        ServerListLayout.filtered(model.servers, query: searchText)
     }
 
     private var showGroups: Bool { !model.settings.groups.isEmpty }
 
     private var sections: [GroupSection] {
-        var result: [GroupSection] = []
-        for group in model.settings.groups {
-            let items = filteredServers.filter { $0.groupId == group.id }
-            if !items.isEmpty {
-                result.append(GroupSection(id: group.id, name: group.name, servers: items))
-            }
-        }
-        let ungrouped = filteredServers.filter { server in
-            server.groupId == nil || !model.settings.groups.contains { $0.id == server.groupId }
-        }
-        if !ungrouped.isEmpty {
-            result.append(GroupSection(id: "__ungrouped__", name: "Ungrouped", servers: ungrouped))
-        }
-        return result
+        ServerListLayout.sections(filtered, groups: model.settings.groups)
     }
 
     @ViewBuilder
@@ -99,43 +76,9 @@ struct ServerListView: View {
             model.connectIfNeeded(server)
             path.append(server)
         } label: {
-            row(server)
+            ServerRow(server: server)
         }
         .buttonStyle(.plain)
-        .contextMenu {
-            if model.state(server.id) == .connected || model.state(server.id) == .connecting {
-                Button(role: .destructive) {
-                    model.disconnect(server.id)
-                } label: {
-                    Label("Disconnect", systemImage: "xmark.circle")
-                }
-            }
-
-            Button {
-                model.reconnect(server)
-            } label: {
-                Label("Reconnect", systemImage: "arrow.clockwise")
-            }
-        }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) { model.delete(server) } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            Button { editing = server } label: {
-                Label("Edit", systemImage: "pencil")
-            }.tint(.gray)
-        }
-    }
-
-    private func row(_ server: ServerConfig) -> some View {
-        HStack(spacing: 12) {
-            StatusDot(state: model.state(server.id))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(server.name).font(.headline)
-                Text("\(server.username)@\(server.host):\(server.port) · \(model.state(server.id).label)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
+        .serverRowActions(server, model: model, editing: $editing)
     }
 }
