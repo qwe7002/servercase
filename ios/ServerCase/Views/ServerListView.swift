@@ -1,11 +1,5 @@
 import SwiftUI
 
-enum ServerListMode: String, CaseIterable {
-    case all
-    case groups
-    var label: String { self == .all ? "All" : "Groups" }
-}
-
 private struct GroupSection: Identifiable {
     let id: String
     let name: String
@@ -18,7 +12,6 @@ struct ServerListView: View {
     @State private var addingNew = false
     @State private var showingSettings = false
     @State private var searchText = ""
-    @State private var mode: ServerListMode = .all
 
     var body: some View {
         NavigationStack {
@@ -54,13 +47,6 @@ struct ServerListView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showingSettings = true } label: { Image(systemName: "gearshape") }
                 }
-                ToolbarItem(placement: .principal) {
-                    Picker("View", selection: $mode) {
-                        ForEach(ServerListMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 200)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { addingNew = true } label: { Image(systemName: "plus") }
                 }
@@ -87,9 +73,7 @@ struct ServerListView: View {
         }
     }
 
-    private var showGroups: Bool {
-        mode == .groups && searchText.trimmingCharacters(in: .whitespaces).isEmpty
-    }
+    private var showGroups: Bool { !model.settings.groups.isEmpty }
 
     private var sections: [GroupSection] {
         var result: [GroupSection] = []

@@ -4,7 +4,6 @@ import { useServers } from '../store/servers';
 import { useSettings } from '../store/settings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
   ChevronDown,
@@ -37,8 +36,6 @@ const UNGROUPED = '__ungrouped__';
 export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Props) {
   const servers = useServers((s) => s.servers);
   const groups = useSettings((s) => s.settings.groups);
-  const viewMode = useServers((s) => s.viewMode);
-  const setViewMode = useServers((s) => s.setViewMode);
   const collapsedGroups = useServers((s) => s.collapsedGroups);
   const toggleGroup = useServers((s) => s.toggleGroup);
 
@@ -49,25 +46,24 @@ export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Pr
     s.name.toLowerCase().includes(q) ||
     s.host.toLowerCase().includes(q) ||
     s.username.toLowerCase().includes(q);
+  const filtered = servers.filter(matches);
 
-  // Group sections (only when not searching and in "groups" mode).
+  // Always group; fall back to a flat list only when no groups are defined.
+  const grouped = groups.length > 0;
   const sections = [
     ...groups.map((g) => ({
       id: g.id,
       name: g.name,
-      items: servers.filter((s) => s.groupId === g.id),
+      items: filtered.filter((s) => s.groupId === g.id),
     })),
     {
       id: UNGROUPED,
       name: 'Ungrouped',
-      items: servers.filter(
+      items: filtered.filter(
         (s) => !s.groupId || !groups.some((g) => g.id === s.groupId),
       ),
     },
   ].filter((sec) => sec.items.length > 0);
-
-  const grouped = viewMode === 'groups' && !q;
-  const filtered = servers.filter(matches);
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r bg-card/60">
@@ -78,7 +74,15 @@ export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Pr
           </span>
           ServerCase
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <Button
+            size="icon"
+            variant="ghost"
+            title="Manage groups"
+            onClick={onManageGroups}
+          >
+            <Folders />
+          </Button>
           <Button size="icon" variant="ghost" title="Settings" onClick={onOpenSettings}>
             <SettingsIcon />
           </Button>
@@ -88,7 +92,7 @@ export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Pr
         </div>
       </div>
 
-      <div className="space-y-2 border-b p-2">
+      <div className="border-b p-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -97,31 +101,6 @@ export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Pr
             onChange={(e) => setQuery(e.target.value)}
             className="h-8 pl-8"
           />
-        </div>
-        <div className="flex items-center gap-2">
-          <Tabs
-            value={viewMode}
-            onValueChange={(v) => setViewMode(v as 'all' | 'groups')}
-            className="flex-1"
-          >
-            <TabsList className="grid h-8 w-full grid-cols-2">
-              <TabsTrigger value="all" className="text-xs">
-                All
-              </TabsTrigger>
-              <TabsTrigger value="groups" className="text-xs">
-                Groups
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-8 shrink-0"
-            title="Manage groups"
-            onClick={onManageGroups}
-          >
-            <Folders className="size-4" />
-          </Button>
         </div>
       </div>
 

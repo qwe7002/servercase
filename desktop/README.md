@@ -6,8 +6,8 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
 ## Features
 
 - Add / edit / delete servers (password or private-key auth), organized into
-  managed **groups** (assigned via a dropdown), with a sidebar **search** box
-  and an All / Groups view toggle
+  managed, collapsible **groups** (assigned via a dropdown), with a sidebar
+  **search** box
 - Live status dashboard: CPU%, memory, swap, per-mount disk usage, network
   throughput, load average and uptime — parsed entirely from `/proc` + `df`
 - Interactive SSH terminal (xterm.js) with a full PTY shell

@@ -2,7 +2,6 @@ package com.servercase.app.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,7 +19,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,7 +72,6 @@ fun ServerListScreen(
         },
     ) { padding ->
         var query by remember { mutableStateOf("") }
-        var groupsView by remember { mutableStateOf(false) }
 
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (state.servers.isEmpty()) {
@@ -95,13 +92,6 @@ fun ServerListScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
-            Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(selected = !groupsView, onClick = { groupsView = false }, label = { Text("All") })
-                FilterChip(selected = groupsView, onClick = { groupsView = true }, label = { Text("Groups") })
-            }
 
             val q = query.trim().lowercase()
             val filtered = if (q.isEmpty()) state.servers else state.servers.filter {
@@ -129,7 +119,7 @@ fun ServerListScreen(
                 return@Column
             }
 
-            val showGroups = groupsView && q.isEmpty()
+            val showGroups = state.settings.groups.isNotEmpty()
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 if (showGroups) {
                     state.settings.groups.forEach { group ->
