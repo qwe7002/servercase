@@ -12,6 +12,8 @@ data class ServerConfig(
     val host: String,
     val port: Int = 22,
     val username: String = "root",
+    /** Optional group/folder name for organizing the server list. */
+    val group: String? = null,
     val authType: AuthType = AuthType.PASSWORD,
     val password: String? = null,
     /** PEM private key text when [authType] is [AuthType.KEY]. */

@@ -22,7 +22,8 @@ a read-only mode is available. See its [README](mcp/README.md).
 
 All three clients implement the same flow:
 
-1. **Server list** with password / private-key auth, persisted locally.
+1. **Server list** with password / private-key auth, persisted locally, and
+   optional **groups** for organizing servers.
 2. **Connect** over SSH.
 3. **Status dashboard** — CPU%, memory, swap, per-mount disk usage, network
    throughput, load average and uptime.

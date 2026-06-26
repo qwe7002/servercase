@@ -53,6 +53,10 @@ interface ServersState {
   removeServer: (id: string) => void;
   select: (id: string | null) => void;
 
+  /** Names of groups the user has collapsed in the sidebar. */
+  collapsedGroups: string[];
+  toggleGroup: (name: string) => void;
+
   setConnState: (id: string, state: ConnectionState, error?: string) => void;
   setStatus: (id: string, status: ServerStatus) => void;
 
@@ -74,6 +78,7 @@ export const useServers = create<ServersState>()(
       connState: {},
       status: {},
       lastError: {},
+      collapsedGroups: [],
 
       addServer: (cfg) => {
         const id = uid();
@@ -97,6 +102,13 @@ export const useServers = create<ServersState>()(
           void window.servercase?.bw.delete(id).catch(() => undefined);
       },
       select: (id) => set({ selectedId: id }),
+
+      toggleGroup: (name) =>
+        set((s) => ({
+          collapsedGroups: s.collapsedGroups.includes(name)
+            ? s.collapsedGroups.filter((g) => g !== name)
+            : [...s.collapsedGroups, name],
+        })),
 
       setConnState: (id, state, error) =>
         set((s) => ({
@@ -133,6 +145,7 @@ export const useServers = create<ServersState>()(
       // local storage, so strip them before persisting.
       partialize: (s) => ({
         servers: vaultEnabled() ? s.servers.map(stripSecrets) : s.servers,
+        collapsedGroups: s.collapsedGroups,
       }),
     },
   ),

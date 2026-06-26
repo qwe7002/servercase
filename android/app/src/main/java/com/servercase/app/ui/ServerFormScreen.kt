@@ -40,6 +40,7 @@ fun ServerFormScreen(
     onBack: () -> Unit,
 ) {
     var name by remember { mutableStateOf(existing?.name ?: "") }
+    var group by remember { mutableStateOf(existing?.group ?: "") }
     var host by remember { mutableStateOf(existing?.host ?: "") }
     var port by remember { mutableStateOf((existing?.port ?: 22).toString()) }
     var username by remember { mutableStateOf(existing?.username ?: "root") }
@@ -67,6 +68,7 @@ fun ServerFormScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(group, { group = it }, label = { Text("Group (optional)") }, modifier = Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(host, { host = it }, label = { Text("Host") }, modifier = Modifier.weight(3f))
                 OutlinedTextField(
@@ -121,6 +123,7 @@ fun ServerFormScreen(
                             host = host.trim(),
                             port = port.toIntOrNull() ?: 22,
                             username = username.trim(),
+                            group = group.trim().ifBlank { null },
                             authType = authType,
                             password = if (authType == AuthType.PASSWORD) password else null,
                             privateKey = if (authType == AuthType.KEY) privateKey else null,

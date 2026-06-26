@@ -11,6 +11,8 @@ export interface ServerConfig {
   port: number;
   username: string;
   authType: AuthType;
+  /** Optional group/folder name for organizing the server list. */
+  group?: string;
   /** Present when authType === 'password'. */
   password?: string;
   /** PEM private key text, present when authType === 'key'. */

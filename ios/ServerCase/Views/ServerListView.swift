@@ -17,18 +17,14 @@ struct ServerListView: View {
                     )
                 } else {
                     List {
-                        ForEach(model.servers) { server in
-                            NavigationLink(value: server) {
-                                row(server)
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) { model.delete(server) } label: {
-                                    Label("Delete", systemImage: "trash")
+                        if hasGroups {
+                            ForEach(grouped, id: \.name) { group in
+                                Section(group.name.isEmpty ? "Ungrouped" : group.name) {
+                                    ForEach(group.servers) { server in serverLink(server) }
                                 }
-                                Button { editing = server } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }.tint(.gray)
                             }
+                        } else {
+                            ForEach(model.servers) { server in serverLink(server) }
                         }
                     }
                 }
@@ -54,6 +50,34 @@ struct ServerListView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
+        }
+    }
+
+    private var grouped: [(name: String, servers: [ServerConfig])] {
+        var order: [String] = []
+        var map: [String: [ServerConfig]] = [:]
+        for s in model.servers {
+            let g = (s.group?.trimmingCharacters(in: .whitespaces)).flatMap { $0.isEmpty ? nil : $0 } ?? ""
+            if map[g] == nil { order.append(g) }
+            map[g, default: []].append(s)
+        }
+        return order.map { (name: $0, servers: map[$0]!) }
+    }
+
+    private var hasGroups: Bool { grouped.contains { !$0.name.isEmpty } }
+
+    @ViewBuilder
+    private func serverLink(_ server: ServerConfig) -> some View {
+        NavigationLink(value: server) {
+            row(server)
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive) { model.delete(server) } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            Button { editing = server } label: {
+                Label("Edit", systemImage: "pencil")
+            }.tint(.gray)
         }
     }
 

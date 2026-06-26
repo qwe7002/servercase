@@ -24,8 +24,13 @@ interface Props {
 export function ServerForm({ existing, onDone }: Props) {
   const addServer = useServers((s) => s.addServer);
   const updateServer = useServers((s) => s.updateServer);
+  const servers = useServers((s) => s.servers);
+  const existingGroups = [
+    ...new Set(servers.map((s) => s.group).filter((g): g is string => !!g)),
+  ];
 
   const [name, setName] = useState(existing?.name ?? '');
+  const [group, setGroup] = useState(existing?.group ?? '');
   const [host, setHost] = useState(existing?.host ?? '');
   const [port, setPort] = useState(String(existing?.port ?? 22));
   const [username, setUsername] = useState(existing?.username ?? 'root');
@@ -46,6 +51,7 @@ export function ServerForm({ existing, onDone }: Props) {
       host: host.trim(),
       port: Number(port) || 22,
       username: username.trim(),
+      group: group.trim() || undefined,
       authType,
       password: authType === 'password' ? password : undefined,
       privateKey: authType === 'key' ? privateKey : undefined,
@@ -71,14 +77,31 @@ export function ServerForm({ existing, onDone }: Props) {
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="server-name">Name</Label>
-              <Input
-                id="server-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="server-name">Name</Label>
+                <Input
+                  id="server-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="server-group">Group</Label>
+                <Input
+                  id="server-group"
+                  value={group}
+                  list="server-groups"
+                  placeholder="Optional"
+                  onChange={(e) => setGroup(e.target.value)}
+                />
+                <datalist id="server-groups">
+                  {existingGroups.map((g) => (
+                    <option key={g} value={g} />
+                  ))}
+                </datalist>
+              </div>
             </div>
 
             <div className="grid grid-cols-[1fr_7rem] gap-3">

@@ -7,6 +7,7 @@ struct ServerFormView: View {
     let existing: ServerConfig?
 
     @State private var name = ""
+    @State private var group = ""
     @State private var host = ""
     @State private var port = "22"
     @State private var username = "root"
@@ -26,6 +27,8 @@ struct ServerFormView: View {
             Form {
                 Section("Server") {
                     TextField("Name", text: $name)
+                    TextField("Group (optional)", text: $group)
+                        .autocorrectionDisabled()
                     TextField("Host", text: $host)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("Port", text: $port).keyboardType(.numberPad)
@@ -66,6 +69,7 @@ struct ServerFormView: View {
     private func populate() {
         guard let e = existing else { return }
         name = e.name; host = e.host; port = String(e.port); username = e.username
+        group = e.group ?? ""
         authType = e.authType
         password = e.password ?? ""
         privateKey = e.privateKey ?? ""
@@ -75,6 +79,8 @@ struct ServerFormView: View {
     private func save() {
         var server = existing ?? ServerConfig(name: name, host: host)
         server.name = name.trimmingCharacters(in: .whitespaces)
+        let trimmedGroup = group.trimmingCharacters(in: .whitespaces)
+        server.group = trimmedGroup.isEmpty ? nil : trimmedGroup
         server.host = host.trimmingCharacters(in: .whitespaces)
         server.port = Int(port) ?? 22
         server.username = username.trimmingCharacters(in: .whitespaces)

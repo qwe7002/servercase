@@ -73,15 +73,30 @@ fun ServerListScreen(
                 )
             }
         } else {
+            val grouped = linkedMapOf<String, MutableList<ServerConfig>>()
+            state.servers.forEach { s ->
+                val g = s.group?.trim().takeUnless { it.isNullOrEmpty() } ?: ""
+                grouped.getOrPut(g) { mutableListOf() }.add(s)
+            }
+            val hasGroups = grouped.keys.any { it.isNotEmpty() }
+
+            @Composable
+            fun row(server: ServerConfig) = ServerRow(
+                server = server,
+                state = state.connState[server.id] ?: ConnectionState.DISCONNECTED,
+                onClick = { onOpen(server) },
+                onEdit = { onEdit(server) },
+                onDelete = { onDelete(server) },
+            )
+
             LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-                items(state.servers, key = { it.id }) { server ->
-                    ServerRow(
-                        server = server,
-                        state = state.connState[server.id] ?: ConnectionState.DISCONNECTED,
-                        onClick = { onOpen(server) },
-                        onEdit = { onEdit(server) },
-                        onDelete = { onDelete(server) },
-                    )
+                if (hasGroups) {
+                    grouped.forEach { (group, servers) ->
+                        item(key = "header_$group") { GroupHeader(group.ifEmpty { "Ungrouped" }) }
+                        items(servers, key = { it.id }) { server -> row(server) }
+                    }
+                } else {
+                    items(state.servers, key = { it.id }) { server -> row(server) }
                 }
             }
         }
@@ -129,4 +144,15 @@ private fun ConnectionState.label(): String = when (this) {
     ConnectionState.CONNECTING -> "Connecting…"
     ConnectionState.ERROR -> "Error"
     ConnectionState.DISCONNECTED -> "Offline"
+}
+
+@Composable
+private fun GroupHeader(name: String) {
+    Text(
+        name.uppercase(),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, top = 12.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+    )
 }
