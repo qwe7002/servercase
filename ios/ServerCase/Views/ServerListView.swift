@@ -1,5 +1,17 @@
 import SwiftUI
 
+struct RootView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    var body: some View {
+        if horizontalSizeClass == .compact {
+            ServerListView()
+        } else {
+            ServerSplitView()
+        }
+    }
+}
+
 /// Compact (iPhone) layout: a single navigation stack that pushes the dashboard
 /// for the tapped server. The iPad layout lives in `ServerSplitView`.
 struct ServerListView: View {
@@ -80,6 +92,104 @@ struct ServerListView: View {
         }
         .buttonStyle(.plain)
         .serverRowActions(server, model: model, editing: $editing)
+    }
+}
+
+struct ServerSplitView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var selectedServerID: ServerConfig.ID?
+    @State private var editing: ServerConfig?
+    @State private var addingNew = false
+    @State private var showingSettings = false
+    @State private var searchText = ""
+
+    var body: some View {
+        NavigationSplitView {
+            sidebar
+                .navigationTitle("ServerCase")
+                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
+                .searchable(text: $searchText, prompt: "Search servers")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { addingNew = true } label: { Image(systemName: "plus") }
+                    }
+                }
+        } detail: {
+            if let selectedServer {
+                DashboardView(server: selectedServer)
+            } else {
+                ContentUnavailableView(
+                    "Select a server",
+                    systemImage: "server.rack",
+                    description: Text("Choose a server from the sidebar.")
+                )
+            }
+        }
+        .onChange(of: selectedServerID) { _, newValue in
+            guard let server = model.servers.first(where: { $0.id == newValue }) else { return }
+            model.connectIfNeeded(server)
+        }
+        .onChange(of: model.servers) { _, servers in
+            guard let selectedServerID, !servers.contains(where: { $0.id == selectedServerID }) else { return }
+            self.selectedServerID = nil
+        }
+        .sheet(isPresented: $addingNew) {
+            ServerFormView(existing: nil)
+        }
+        .sheet(item: $editing) { server in
+            ServerFormView(existing: server)
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
+        }
+    }
+
+    @ViewBuilder
+    private var sidebar: some View {
+        if model.servers.isEmpty {
+            ContentUnavailableView(
+                "No servers",
+                systemImage: "server.rack",
+                description: Text("Tap + to add your first server.")
+            )
+        } else if filtered.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+        } else {
+            List(selection: $selectedServerID) {
+                if showGroups {
+                    ForEach(sections) { section in
+                        Section(section.name) {
+                            ForEach(section.servers) { server in row(server) }
+                        }
+                    }
+                } else {
+                    ForEach(filtered) { server in row(server) }
+                }
+            }
+        }
+    }
+
+    private var selectedServer: ServerConfig? {
+        model.servers.first { $0.id == selectedServerID }
+    }
+
+    private var filtered: [ServerConfig] {
+        ServerListLayout.filtered(model.servers, query: searchText)
+    }
+
+    private var showGroups: Bool { !model.settings.groups.isEmpty }
+
+    private var sections: [GroupSection] {
+        ServerListLayout.sections(filtered, groups: model.settings.groups)
+    }
+
+    private func row(_ server: ServerConfig) -> some View {
+        ServerRow(server: server)
+            .tag(server.id)
+            .serverRowActions(server, model: model, editing: $editing)
     }
 }
 

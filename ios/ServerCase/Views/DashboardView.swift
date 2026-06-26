@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let server: ServerConfig
 
     @State private var selectedTab: ServerDetailTab = .overview
@@ -18,8 +19,10 @@ struct DashboardView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .frame(maxWidth: tabPickerMaxWidth)
             .padding(.horizontal)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
             .background(Color(.systemBackground))
 
             Divider()
@@ -30,6 +33,14 @@ struct DashboardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { model.startPolling(server.id) }
         .onDisappear { model.stopPolling() }
+    }
+
+    private var overviewMaxWidth: CGFloat {
+        horizontalSizeClass == .regular ? 760 : .infinity
+    }
+
+    private var tabPickerMaxWidth: CGFloat {
+        horizontalSizeClass == .regular ? 520 : .infinity
     }
 
     private var title: String {
@@ -76,6 +87,8 @@ struct DashboardView: View {
                 }
             }
             .padding()
+            .frame(maxWidth: overviewMaxWidth, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
