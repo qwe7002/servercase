@@ -11,18 +11,20 @@ struct DashboardView: View {
     private var connected: Bool { state == .connected }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            overview
-                .tabItem { Label("Overview", systemImage: "gauge.with.dots.needle.33percent") }
-                .tag(ServerDetailTab.overview)
+        VStack(spacing: 0) {
+            Picker("Section", selection: $selectedTab) {
+                ForEach(ServerDetailTab.allCases) { tab in
+                    Label(tab.title, systemImage: tab.systemImage).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color(.systemBackground))
 
-            TerminalView(server: server)
-                .tabItem { Label("Terminal", systemImage: "terminal") }
-                .tag(ServerDetailTab.terminal)
+            Divider()
 
-            FilesView(server: server)
-                .tabItem { Label("Files", systemImage: "folder") }
-                .tag(ServerDetailTab.files)
+            content
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -47,6 +49,18 @@ struct DashboardView: View {
         case .overview: return server.name
         case .terminal: return "Terminal"
         case .files: return "Files"
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selectedTab {
+        case .overview:
+            overview
+        case .terminal:
+            TerminalView(server: server)
+        case .files:
+            FilesView(server: server)
         }
     }
 
@@ -140,10 +154,28 @@ struct DashboardView: View {
     }
 }
 
-private enum ServerDetailTab {
+private enum ServerDetailTab: CaseIterable, Identifiable {
     case overview
     case terminal
     case files
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .overview: return "Overview"
+        case .terminal: return "Terminal"
+        case .files: return "Files"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .overview: return "gauge.with.dots.needle.33percent"
+        case .terminal: return "terminal"
+        case .files: return "folder"
+        }
+    }
 }
 
 private extension View {
