@@ -80,7 +80,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         bridge.attach(context.coordinator)
 
         DispatchQueue.main.async {
-            terminal.becomeFirstResponder()
+            _ = terminal.becomeFirstResponder()
         }
 
         return terminal
@@ -149,11 +149,11 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
             let rows = max(size.rows, 24)
             let service = service
 
-            openingTask = Task { [weak self, weak terminal] in
+            openingTask = Task { [weak self] in
+                guard let self else { return }
                 do {
                     let opened = try await service.openTerminal(cols: cols, rows: rows)
                     await MainActor.run {
-                        guard let self else { return }
                         self.session = opened
                         self.openingTask = nil
                         self.flushPendingWrites()
@@ -161,17 +161,17 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
 
                     for try await chunk in opened.output {
                         await MainActor.run {
-                            guard let terminal else { return }
+                            guard let terminal = self.terminal else { return }
                             let bytes = Array(chunk)
                             terminal.feed(byteArray: bytes[...])
                         }
                     }
                 } catch is CancellationError {
-                    await MainActor.run { self?.openingTask = nil }
+                    await MainActor.run { self.openingTask = nil }
                 } catch {
                     await MainActor.run {
-                        self?.openingTask = nil
-                        terminal?.feed(text: "\r\n[terminal] \(error.localizedDescription)\r\n")
+                        self.openingTask = nil
+                        self.terminal?.feed(text: "\r\n[terminal] \(error.localizedDescription)\r\n")
                     }
                 }
             }
