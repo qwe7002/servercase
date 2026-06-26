@@ -1,3 +1,4 @@
+import GameController
 import SwiftTerm
 import SwiftUI
 
@@ -59,6 +60,42 @@ private final class TerminalBridge: ObservableObject {
     }
 }
 
+/// A SwiftTerm terminal view that hides the on-screen extended keyboard
+/// (SwiftTerm's `inputAccessoryView`) whenever a hardware keyboard is attached,
+/// matching the OS behaviour of suppressing the software keyboard. Detection
+/// uses GameController's `GCKeyboard`.
+private final class HardwareAwareTerminalView: SwiftTerm.TerminalView {
+    private var hardwareKeyboardConnected = false {
+        didSet {
+            guard hardwareKeyboardConnected != oldValue else { return }
+            reloadInputViews()
+        }
+    }
+
+    override var inputAccessoryView: UIView? {
+        hardwareKeyboardConnected ? nil : super.inputAccessoryView
+    }
+
+    func startMonitoringHardwareKeyboard() {
+        hardwareKeyboardConnected = GCKeyboard.coalesced != nil
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(hardwareKeyboardChanged),
+                       name: .GCKeyboardDidConnect, object: nil)
+        nc.addObserver(self, selector: #selector(hardwareKeyboardChanged),
+                       name: .GCKeyboardDidDisconnect, object: nil)
+    }
+
+    @objc private func hardwareKeyboardChanged() {
+        DispatchQueue.main.async { [weak self] in
+            self?.hardwareKeyboardConnected = GCKeyboard.coalesced != nil
+        }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
+
 private struct SwiftTermTerminalView: UIViewRepresentable {
     let service: SSHService
     let bridge: TerminalBridge
@@ -68,10 +105,11 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> SwiftTerm.TerminalView {
-        let terminal = SwiftTerm.TerminalView(
+        let terminal = HardwareAwareTerminalView(
             frame: .zero,
             font: .monospacedSystemFont(ofSize: 13, weight: .regular)
         )
+        terminal.startMonitoringHardwareKeyboard()
         terminal.terminalDelegate = context.coordinator
         terminal.nativeBackgroundColor = UIColor(red: 0.04, green: 0.05, blue: 0.07, alpha: 1)
         terminal.nativeForegroundColor = UIColor(red: 0.84, green: 0.86, blue: 0.9, alpha: 1)
