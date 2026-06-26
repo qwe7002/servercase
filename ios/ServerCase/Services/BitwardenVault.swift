@@ -2,7 +2,7 @@ import Foundation
 import CommonCrypto
 import CryptoKit
 import Security
-import Argon2Swift
+import SwiftArgon2
 
 enum BitwardenLockState: String, Codable {
     case unauthenticated
@@ -38,7 +38,7 @@ enum BitwardenError: LocalizedError {
 ///
 /// Auth uses a personal API key (OAuth `client_credentials`); the master
 /// password is required only to derive the vault key locally and is never sent
-/// to the server or persisted. Only the PBKDF2 KDF is supported.
+/// to the server or persisted. PBKDF2 and Argon2id account KDFs are supported.
 actor BitwardenVault {
     private var settings = BitwardenSettings()
     private var accessToken: String?
@@ -81,9 +81,14 @@ actor BitwardenVault {
     func unlock(_ masterPassword: String) async throws -> BitwardenStatus {
         guard configured else { throw BitwardenError.notConfigured }
         let token = try await requestToken()
-        let kdf = token.kdf ?? (await prelogin())
+        let kdf: KdfInfo
+        if let tokenKdf = token.kdf {
+            kdf = tokenKdf
+        } else {
+            kdf = await prelogin()
+        }
 
-        let masterKey = try deriveMasterKey(masterPassword, kdf: kdf)
+        let masterKey = try await deriveMasterKey(masterPassword, kdf: kdf)
         let stretchedEnc = hkdfExpand(masterKey, info: "enc", length: 32)
         let stretchedMac = hkdfExpand(masterKey, info: "mac", length: 32)
         let userKey = try decryptEncString(token.key, encKey: stretchedEnc, macKey: stretchedMac)
@@ -175,25 +180,24 @@ actor BitwardenVault {
 
     // MARK: Crypto
 
-    private func deriveMasterKey(_ password: String, kdf: KdfInfo) throws -> Data {
+    private func deriveMasterKey(_ password: String, kdf: KdfInfo) async throws -> Data {
         let email = settings.email.trimmingCharacters(in: .whitespaces).lowercased()
         switch kdf.type {
         case 0:
             return pbkdf2(password, salt: email, iterations: kdf.iterations, keyLength: 32)
         case 1:
-            // Bitwarden Argon2id: salt = SHA-256(email), memory in MiB → KiB.
+            // Bitwarden Argon2id: salt = SHA-256(email), memory in MiB -> KiB.
             let salt = Data(SHA256.hash(data: Data(email.utf8)))
-            let result = try Argon2Swift.hashPasswordBytes(
-                password: Data(password.utf8),
-                salt: Salt(bytes: salt),
-                iterations: kdf.iterations,
-                memory: kdf.memory * 1024,
-                parallelism: kdf.parallelism,
-                length: 32,
-                type: .id,
-                version: .V13
+            let argon2 = try Argon2(
+                params: Argon2Params(
+                    parallelism: UInt32(kdf.parallelism),
+                    tagLength: 32,
+                    memorySize: UInt32(kdf.memory * 1024),
+                    iterations: UInt32(kdf.iterations),
+                    variant: .argon2id
+                )
             )
-            return result.hashData()
+            return try await argon2.compute(password: Data(password.utf8), salt: salt)
         default:
             throw BitwardenError.crypto("unsupported KDF type \(kdf.type)")
         }
@@ -378,6 +382,7 @@ actor BitwardenVault {
 
     private func aes(_ operation: CCOperation, key: Data, iv: Data, data: Data) -> Data? {
         var out = Data(count: data.count + kCCBlockSizeAES128)
+        let outCount = out.count
         var moved = 0
         let status = out.withUnsafeMutableBytes { outB in
             data.withUnsafeBytes { dataB in
@@ -387,7 +392,7 @@ actor BitwardenVault {
                                 keyB.baseAddress, key.count,
                                 ivB.baseAddress,
                                 dataB.baseAddress, data.count,
-                                outB.baseAddress, out.count, &moved)
+                                outB.baseAddress, outCount, &moved)
                     }
                 }
             }

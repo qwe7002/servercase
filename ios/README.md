@@ -9,7 +9,7 @@ over SwiftNIO).
 - Add / edit / delete servers (password auth; private-key auth is a TODO)
 - Live status dashboard: CPU%, memory, swap, per-mount disks, network
   throughput, load average and uptime — parsed from `/proc` + `df`
-- Command console over the live SSH connection, with a snippet menu
+- Interactive PTY terminal over the live SSH connection, with a snippet menu
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download) over the live connection
 - **Global settings** (gear in the server list):
@@ -33,7 +33,7 @@ Models/
   Settings.swift          GlobalSettings / Snippet / AutoSync / Bitwarden models
   StatusParser.swift      statusCommand + /proc parsing, CPU/net deltas
 Services/
-  SSHService.swift        Citadel connection (actor): run() for commands
+  SSHService.swift        Citadel connection (actor): exec + PTY terminal
   RemoteFiles.swift       command-based SFTP-style file operations
   BitwardenVault.swift    clean-room Bitwarden client (CommonCrypto + CryptoKit)
   SettingsStore.swift     UserDefaults settings persistence

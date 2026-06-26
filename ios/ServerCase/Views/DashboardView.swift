@@ -4,11 +4,53 @@ struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
     let server: ServerConfig
 
+    @State private var selectedTab: ServerDetailTab = .overview
+
     private var state: ConnectionState { model.state(server.id) }
     private var status: ServerStatus? { model.status[server.id] }
     private var connected: Bool { state == .connected }
 
     var body: some View {
+        TabView(selection: $selectedTab) {
+            overview
+                .tabItem { Label("Overview", systemImage: "gauge.with.dots.needle.33percent") }
+                .tag(ServerDetailTab.overview)
+
+            TerminalView(server: server)
+                .tabItem { Label("Terminal", systemImage: "terminal") }
+                .tag(ServerDetailTab.terminal)
+
+            FilesView(server: server)
+                .tabItem { Label("Files", systemImage: "folder") }
+                .tag(ServerDetailTab.files)
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if connected {
+                    Button("Disconnect") { model.disconnect(server.id) }
+                } else {
+                    Button(state == .connecting ? "Connecting…" : "Connect") {
+                        model.connect(server)
+                    }
+                    .disabled(state == .connecting)
+                }
+            }
+        }
+        .onAppear { model.startPolling(server.id) }
+        .onDisappear { model.stopPolling() }
+    }
+
+    private var title: String {
+        switch selectedTab {
+        case .overview: return server.name
+        case .terminal: return "Terminal"
+        case .files: return "Files"
+        }
+    }
+
+    private var overview: some View {
         ScrollView {
             VStack(spacing: 16) {
                 if case let .error(message) = state {
@@ -27,42 +69,12 @@ struct DashboardView: View {
                     infoCard(status)
                     memoryCard(status)
                     disksCard(status)
-                    NavigationLink {
-                        TerminalView(server: server)
-                    } label: {
-                        Label("Open terminal", systemImage: "terminal")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    NavigationLink {
-                        FilesView(server: server)
-                    } label: {
-                        Label("Browse files", systemImage: "folder")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
                 } else {
                     placeholder("Collecting status…")
                 }
             }
             .padding()
         }
-        .navigationTitle(server.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if connected {
-                    Button("Disconnect") { model.disconnect(server.id) }
-                } else {
-                    Button(state == .connecting ? "Connecting…" : "Connect") {
-                        model.connect(server)
-                    }
-                    .disabled(state == .connecting)
-                }
-            }
-        }
-        .onAppear { model.startPolling(server.id) }
-        .onDisappear { model.stopPolling() }
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -126,6 +138,12 @@ struct DashboardView: View {
             Text(value).fontWeight(.medium)
         }
     }
+}
+
+private enum ServerDetailTab {
+    case overview
+    case terminal
+    case files
 }
 
 private extension View {
