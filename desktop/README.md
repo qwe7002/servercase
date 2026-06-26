@@ -47,6 +47,8 @@ Notes:
   code (which is GPL and license-incompatible with this BSD-3 project).
 - The API key `client_secret` is stored locally and is redacted from the sync
   file.
+- **Test vault** (shown once unlocked) round-trips a throwaway item — encrypt,
+  upload, fetch, decrypt, verify, delete — to confirm the whole path works.
 
 ## Architecture
 

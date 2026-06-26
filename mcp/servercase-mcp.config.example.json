@@ -1,0 +1,21 @@
+{
+  "readOnly": false,
+  "servers": [
+    {
+      "id": "web1",
+      "name": "Web 1",
+      "host": "10.0.0.10",
+      "port": 22,
+      "username": "root",
+      "password": "your-password-here"
+    },
+    {
+      "id": "db1",
+      "name": "Database",
+      "host": "10.0.0.20",
+      "username": "admin",
+      "privateKeyPath": "/home/you/.ssh/id_ed25519",
+      "passphrase": "optional-key-passphrase"
+    }
+  ]
+}

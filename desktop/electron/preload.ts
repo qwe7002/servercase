@@ -49,6 +49,7 @@ const api = {
       ipcRenderer.invoke(IpcChannels.bwUnlock, masterPassword),
     lock: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwLock),
     sync: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwSync),
+    test: (): Promise<string> => ipcRenderer.invoke(IpcChannels.bwTest),
     set: (serverId: string, secrets: ServerSecrets): Promise<void> =>
       ipcRenderer.invoke(IpcChannels.bwSet, serverId, secrets),
     get: (serverId: string): Promise<ServerSecrets | null> =>

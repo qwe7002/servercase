@@ -209,6 +209,15 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             .onFailure { setMessage(it.message ?: "Push failed") }
     }
 
+    fun testVault() = viewModelScope.launch {
+        setMessage("Testing vault…")
+        try {
+            setMessage(vault.test())
+        } catch (e: Exception) {
+            setMessage("Vault test failed: ${e.message}")
+        }
+    }
+
     // --- Auto-sync --------------------------------------------------------
     private fun restartAutoSync(settings: GlobalSettings) {
         autoSyncJob?.cancel()

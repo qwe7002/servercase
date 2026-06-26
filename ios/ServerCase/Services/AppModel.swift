@@ -171,6 +171,10 @@ final class AppModel: ObservableObject {
         saveServers()
     }
 
+    func testVault() async throws -> String {
+        try await vault.test()
+    }
+
     // MARK: Auto-sync
 
     private func restartAutoSync() {

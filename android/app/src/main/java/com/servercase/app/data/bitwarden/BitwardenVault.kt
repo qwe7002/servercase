@@ -122,6 +122,23 @@ class BitwardenVault {
 
     suspend fun sync() { check(unlocked) { "Bitwarden vault is locked" } }
 
+    /** Round-trips a throwaway item to exercise the full crypto + API path. */
+    suspend fun test(): String = withContext(Dispatchers.IO) {
+        check(unlocked) { "Bitwarden vault is locked" }
+        val id = "__selftest__"
+        val probe = ServerSecrets(username = "servercase", password = "probe-" + UUID.randomUUID())
+        setSecrets(id, probe)
+        try {
+            val read = getSecrets(id)
+            if (read == null || read.username != probe.username || read.password != probe.password) {
+                error("round-trip mismatch — decrypted value did not match")
+            }
+            "Vault OK — wrote, read back and verified ${settings.itemPrefix}$id."
+        } finally {
+            runCatching { deleteSecrets(id) }
+        }
+    }
+
     suspend fun getSecrets(serverId: String): ServerSecrets? = withContext(Dispatchers.IO) {
         findCipher(serverId)?.let { decodeSecrets(it) }
     }

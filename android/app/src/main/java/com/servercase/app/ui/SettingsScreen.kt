@@ -60,6 +60,7 @@ fun SettingsScreen(
     onUnlock: (String) -> Unit,
     onLock: () -> Unit,
     onPushAll: () -> Unit,
+    onTest: () -> Unit,
     onSyncNow: () -> Unit,
     onExport: (Uri) -> Unit,
     onImport: (Uri) -> Unit,
@@ -85,7 +86,7 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            BitwardenSection(state, onUpdateSettings, onUnlock, onLock, onPushAll, onRefreshBitwarden)
+            BitwardenSection(state, onUpdateSettings, onUnlock, onLock, onPushAll, onTest, onRefreshBitwarden)
             SnippetsSection(settings, onUpdateSettings)
             AutoSyncSection(settings, onUpdateSettings, onSyncNow, onExport, onImport)
             state.settingsMessage?.let {
@@ -113,6 +114,7 @@ private fun BitwardenSection(
     onUnlock: (String) -> Unit,
     onLock: () -> Unit,
     onPushAll: () -> Unit,
+    onTest: () -> Unit,
     onRefresh: () -> Unit,
 ) {
     val settings = state.settings
@@ -202,7 +204,8 @@ private fun BitwardenSection(
                         }
                     }
                     BitwardenLockState.UNLOCKED -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onPushAll) { Text("Push all secrets") }
+                        OutlinedButton(onClick = onTest) { Text("Test") }
+                        OutlinedButton(onClick = onPushAll) { Text("Push all") }
                         OutlinedButton(onClick = onLock) { Text("Lock") }
                     }
                 }

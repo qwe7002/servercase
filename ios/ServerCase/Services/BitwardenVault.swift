@@ -105,6 +105,27 @@ actor BitwardenVault {
 
     func sync() async throws { try assertUnlocked() }
 
+    /// Exercises the full vault path with a throwaway item: encrypt + upload a
+    /// probe, fetch + decrypt it back, verify, then delete it.
+    func test() async throws -> String {
+        try assertUnlocked()
+        let id = "__selftest__"
+        let probe = ServerSecrets(username: "servercase", password: "probe-" + UUID().uuidString)
+        try await setSecrets(id, probe)
+        do {
+            let read = try await getSecrets(id)
+            guard let read, read.username == probe.username, read.password == probe.password else {
+                try? await deleteSecrets(id)
+                throw BitwardenError.crypto("round-trip mismatch — decrypted value did not match")
+            }
+            try? await deleteSecrets(id)
+            return "Vault OK — wrote, read back and verified \(settings.itemPrefix)\(id)."
+        } catch {
+            try? await deleteSecrets(id)
+            throw error
+        }
+    }
+
     func getSecrets(_ serverId: String) async throws -> ServerSecrets? {
         guard let cipher = try await findCipher(serverId) else { return nil }
         return decodeSecrets(cipher)

@@ -82,6 +82,7 @@ struct SettingsView: View {
                         SecureField("Master password", text: $master)
                         Button("Unlock") { unlock() }.disabled(busy || master.isEmpty)
                     case .unlocked:
+                        Button("Test vault") { runTest() }.disabled(busy)
                         Button("Push all secrets to vault") { pushAll() }.disabled(busy)
                         Button("Lock vault") { lock() }
                     }
@@ -188,6 +189,18 @@ struct SettingsView: View {
                 message = "All secrets pushed to the vault."
             } catch {
                 message = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func runTest() {
+        busy = true; message = "Testing vault…"
+        Task {
+            do {
+                message = try await model.testVault()
+            } catch {
+                message = "Vault test failed: \(error.localizedDescription)"
             }
             busy = false
         }

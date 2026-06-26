@@ -93,6 +93,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(IpcChannels.bwLock, () => bitwarden.lock());
   ipcMain.handle(IpcChannels.bwSync, () => bitwarden.sync());
+  ipcMain.handle(IpcChannels.bwTest, () => bitwarden.test());
   ipcMain.handle(
     IpcChannels.bwSet,
     (_e, serverId: string, secrets: ServerSecrets) =>

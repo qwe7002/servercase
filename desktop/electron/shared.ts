@@ -182,6 +182,7 @@ export const IpcChannels = {
   bwUnlock: 'sc:bw:unlock',
   bwLock: 'sc:bw:lock',
   bwSync: 'sc:bw:sync',
+  bwTest: 'sc:bw:test',
   bwSet: 'sc:bw:set',
   bwGet: 'sc:bw:get',
   bwList: 'sc:bw:list',

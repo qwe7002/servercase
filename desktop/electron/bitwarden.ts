@@ -120,6 +120,33 @@ export class BitwardenVault {
     this.assertUnlocked();
   }
 
+  /**
+   * Exercises the full vault path end-to-end with a throwaway item: encrypt and
+   * upload a probe, fetch and decrypt it back, verify, then delete it.
+   */
+  async test(): Promise<string> {
+    this.assertUnlocked();
+    const id = '__selftest__';
+    const probe: ServerSecrets = {
+      username: 'servercase',
+      password: `probe-${crypto.randomBytes(8).toString('hex')}`,
+    };
+    await this.setSecrets(id, probe);
+    try {
+      const read = await this.getSecrets(id);
+      if (
+        !read ||
+        read.username !== probe.username ||
+        read.password !== probe.password
+      ) {
+        throw new Error('round-trip mismatch — decrypted value did not match');
+      }
+      return `Vault OK — wrote, read back and verified "${this.settings.itemPrefix}${id}".`;
+    } finally {
+      await this.deleteSecrets(id).catch(() => undefined);
+    }
+  }
+
   async getSecrets(serverId: string): Promise<ServerSecrets | null> {
     const cipher = await this.findCipher(serverId);
     return cipher ? this.decodeSecrets(cipher) : null;

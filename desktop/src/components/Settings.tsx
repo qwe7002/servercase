@@ -150,6 +150,19 @@ function BitwardenSection() {
     }
   };
 
+  const runTest = async () => {
+    if (!api) return;
+    setBusy(true);
+    setMsg('Testing vault…');
+    try {
+      setMsg(await api.bw.test());
+    } catch (e) {
+      setMsg(`Vault test failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const unlocked = status?.state === 'unlocked';
 
   return (
@@ -259,6 +272,9 @@ function BitwardenSection() {
             )}
             {unlocked && (
               <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={runTest} disabled={busy}>
+                  <ShieldCheck /> Test vault
+                </Button>
                 <Button variant="outline" onClick={pushAll} disabled={busy}>
                   <KeyRound /> Push all secrets
                 </Button>

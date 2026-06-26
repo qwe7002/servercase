@@ -9,6 +9,12 @@ standalone, idiomatic implementation for its platform that shares the
 | Desktop (Win/macOS/Linux) | Electron + React + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`desktop/`](desktop) |
 | Android | Jetpack Compose (Kotlin, MVVM) | [SSHJ](https://github.com/hierynomus/sshj) | [`android/`](android) |
 | iOS | SwiftUI (MVVM) | [Citadel](https://github.com/orlandos-nl/Citadel) | [`ios/`](ios) |
+| MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
+
+The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
+server that exposes the same SSH operations (run command, status, SFTP) as
+tools, so an AI assistant can manage your servers. It is config-file driven and
+supports a read-only mode — see its [README](mcp/README.md).
 
 ## Shared design
 

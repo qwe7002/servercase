@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
                             onUnlock = { vm.unlockVault(it) },
                             onLock = { vm.lockVault() },
                             onPushAll = { vm.pushAllSecretsToVault() },
+                            onTest = { vm.testVault() },
                             onSyncNow = { vm.syncNow() },
                             onExport = { vm.exportTo(it) },
                             onImport = { vm.importFrom(it) },
