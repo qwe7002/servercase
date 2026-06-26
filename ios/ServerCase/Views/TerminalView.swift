@@ -60,39 +60,40 @@ private final class TerminalBridge: ObservableObject {
     }
 }
 
-/// A SwiftTerm terminal view that hides the on-screen extended keyboard
-/// (SwiftTerm's `inputAccessoryView`) whenever a hardware keyboard is attached,
-/// matching the OS behaviour of suppressing the software keyboard. Detection
-/// uses GameController's `GCKeyboard`.
-private final class HardwareAwareTerminalView: SwiftTerm.TerminalView {
-    private var hardwareKeyboardConnected = false {
-        didSet {
-            guard hardwareKeyboardConnected != oldValue else { return }
-            reloadInputViews()
-        }
-    }
+/// Hides the terminal's on-screen extended keyboard (SwiftTerm's
+/// `inputAccessoryView`) whenever a hardware keyboard is attached, matching the
+/// OS behaviour of suppressing the software keyboard. SwiftTerm declares
+/// `inputAccessoryView` as `public` (not `open`), so we can't override it from a
+/// subclass — instead we toggle the property's value, saving SwiftTerm's
+/// accessory so it can be restored. Detection uses GameController's `GCKeyboard`.
+private final class HardwareKeyboardMonitor {
+    private weak var terminal: SwiftTerm.TerminalView?
+    /// SwiftTerm's accessory, retained while it is detached so we can restore it.
+    private var savedAccessory: UIView?
 
-    // SwiftTerm overrides `inputAccessoryView` as read/write (backed by its
-    // `_inputAccessory`), so this override must stay read/write too — Swift
-    // forbids narrowing a settable property to get-only. The getter simply
-    // hides the accessory while a hardware keyboard is attached.
-    override var inputAccessoryView: UIView? {
-        get { hardwareKeyboardConnected ? nil : super.inputAccessoryView }
-        set { super.inputAccessoryView = newValue }
-    }
-
-    func startMonitoringHardwareKeyboard() {
-        hardwareKeyboardConnected = GCKeyboard.coalesced != nil
+    func start(for terminal: SwiftTerm.TerminalView) {
+        self.terminal = terminal
+        savedAccessory = terminal.inputAccessoryView
+        apply()
         let nc = NotificationCenter.default
-        nc.addObserver(self, selector: #selector(hardwareKeyboardChanged),
+        nc.addObserver(self, selector: #selector(keyboardChanged),
                        name: .GCKeyboardDidConnect, object: nil)
-        nc.addObserver(self, selector: #selector(hardwareKeyboardChanged),
+        nc.addObserver(self, selector: #selector(keyboardChanged),
                        name: .GCKeyboardDidDisconnect, object: nil)
     }
 
-    @objc private func hardwareKeyboardChanged() {
-        DispatchQueue.main.async { [weak self] in
-            self?.hardwareKeyboardConnected = GCKeyboard.coalesced != nil
+    @objc private func keyboardChanged() {
+        DispatchQueue.main.async { [weak self] in self?.apply() }
+    }
+
+    private func apply() {
+        guard let terminal else { return }
+        // Keep our saved reference current whenever SwiftTerm has an accessory.
+        if let current = terminal.inputAccessoryView { savedAccessory = current }
+        let desired: UIView? = GCKeyboard.coalesced != nil ? nil : savedAccessory
+        if terminal.inputAccessoryView !== desired {
+            terminal.inputAccessoryView = desired
+            terminal.reloadInputViews()
         }
     }
 
@@ -110,16 +111,16 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> SwiftTerm.TerminalView {
-        let terminal = HardwareAwareTerminalView(
+        let terminal = SwiftTerm.TerminalView(
             frame: .zero,
             font: .monospacedSystemFont(ofSize: 13, weight: .regular)
         )
-        terminal.startMonitoringHardwareKeyboard()
         terminal.terminalDelegate = context.coordinator
         terminal.nativeBackgroundColor = UIColor(red: 0.04, green: 0.05, blue: 0.07, alpha: 1)
         terminal.nativeForegroundColor = UIColor(red: 0.84, green: 0.86, blue: 0.9, alpha: 1)
         terminal.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         context.coordinator.attach(terminal)
+        context.coordinator.startKeyboardMonitor(for: terminal)
         bridge.attach(context.coordinator)
 
         DispatchQueue.main.async {
@@ -147,6 +148,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         private var readerTask: Task<Void, Never>?
         private var openingTask: Task<Void, Never>?
         private var pendingWrites: [ArraySlice<UInt8>] = []
+        private let keyboardMonitor = HardwareKeyboardMonitor()
 
         init(service: SSHService, bridge: TerminalBridge) {
             self.service = service
@@ -156,6 +158,10 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         func attach(_ terminal: SwiftTerm.TerminalView) {
             self.terminal = terminal
             openIfNeeded(for: terminal)
+        }
+
+        func startKeyboardMonitor(for terminal: SwiftTerm.TerminalView) {
+            keyboardMonitor.start(for: terminal)
         }
 
         func update(service: SSHService, terminal: SwiftTerm.TerminalView) {
