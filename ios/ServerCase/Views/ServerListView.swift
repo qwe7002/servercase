@@ -102,9 +102,10 @@ struct ServerSplitView: View {
     @State private var addingNew = false
     @State private var showingSettings = false
     @State private var searchText = ""
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
                 .navigationTitle("ServerCase")
                 .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
@@ -128,6 +129,7 @@ struct ServerSplitView: View {
                 )
             }
         }
+        .navigationSplitViewStyle(.balanced)
         .onChange(of: selectedServerID) { _, newValue in
             guard let server = model.servers.first(where: { $0.id == newValue }) else { return }
             model.connectIfNeeded(server)

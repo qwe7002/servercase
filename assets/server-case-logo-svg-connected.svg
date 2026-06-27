@@ -1,6 +1,6 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <title>Server Case Logo</title>
-  <desc>Refined SVG icon based on the original image: a rounded blue app tile with two connected desktop computers, cleaner proportions, corrected shadows, connected right-side cable, and consistent monitor-frame shading.</desc>
+  <desc>Refined SVG icon based on the original image: a full-bleed blue app icon background with two connected desktop computers, cleaner proportions, corrected shadows, connected right-side cable, and consistent monitor-frame shading.</desc>
 
   <defs>
     <linearGradient id="bgGrad" x1="126" y1="96" x2="900" y2="934" gradientUnits="userSpaceOnUse">
@@ -84,11 +84,9 @@
     </clipPath>
   </defs>
 
-  <!-- App tile -->
-  <g filter="url(#tileShadow)">
-    <rect x="66" y="55" width="892" height="895" rx="198" fill="url(#bgGrad)"/>
-    <rect x="66" y="55" width="892" height="895" rx="198" fill="url(#bgLight)"/>
-  </g>
+  <!-- App icons must be full-bleed squares; iOS applies the corner mask. -->
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bgGrad)"/>
+  <rect x="0" y="0" width="1024" height="1024" fill="url(#bgLight)"/>
 
   <!-- Network cable: drawn under computers and node, matching the original image layering. -->
   <g filter="url(#cableShadow)" stroke-linecap="round" stroke-linejoin="round">

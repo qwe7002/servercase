@@ -6,12 +6,16 @@ import UniformTypeIdentifiers
 /// command-based `RemoteFiles` service.
 struct FilesView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let server: ServerConfig
 
     @State private var path = "."
     @State private var listing: RemoteListing?
     @State private var loading = false
     @State private var message: String?
+    @State private var selectedPath: String?
+    @State private var treeChildren: [String: [RemoteFile]] = [:]
+    @State private var expandedPaths: Set<String> = ["/"]
 
     @State private var editing: EditingFile?
     @State private var renaming: RemoteFile?
@@ -30,34 +34,12 @@ struct FilesView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if loading && listing == nil {
-                List {
-                    ForEach(0..<10, id: \.self) { _ in
-                        HStack(spacing: 12) {
-                            Image(systemName: "doc.text").foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Placeholder file name")
-                                Text("123 KB · rw-r--r-- · placeholder")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .redacted(reason: .placeholder)
+            if horizontalSizeClass == .regular {
+                regularBrowser
             } else {
-                List {
-                    ForEach(listing?.entries ?? []) { entry in
-                        row(entry)
-                    }
-                    if (listing?.entries.isEmpty ?? false) {
-                        Text("Empty directory.")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .listStyle(.plain)
+                compactBrowser
             }
-            if let message {
+            if horizontalSizeClass != .regular, let message {
                 Text(message)
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,6 +69,182 @@ struct FilesView: View {
             TextField("Name", text: $renameText)
             Button("Rename") { confirmRename() }
             Button("Cancel", role: .cancel) { renaming = nil }
+        }
+    }
+
+    @ViewBuilder
+    private var compactBrowser: some View {
+        if loading && listing == nil {
+            List {
+                ForEach(0..<10, id: \.self) { _ in
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.text").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Placeholder file name")
+                            Text("123 KB · rw-r--r-- · placeholder")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .redacted(reason: .placeholder)
+        } else {
+            List {
+                ForEach(listing?.entries ?? []) { entry in
+                    row(entry)
+                }
+                if (listing?.entries.isEmpty ?? false) {
+                    Text("Empty directory.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .listStyle(.plain)
+        }
+    }
+
+    private var regularBrowser: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        FileTreeNode(
+                            nodePath: "/",
+                            name: "/",
+                            depth: 0,
+                            currentPath: listing?.path ?? path,
+                            treeChildren: treeChildren,
+                            expandedPaths: $expandedPaths,
+                            onSelect: { target in Task { await load(target) } },
+                            onToggle: toggleTree
+                        )
+                    }
+                    .padding(.vertical, 6)
+                }
+                .frame(width: 260)
+                .background(Palette.surface.opacity(0.35))
+
+                Divider()
+
+                VStack(spacing: 0) {
+                    fileTableHeader
+                    Divider()
+                    ZStack(alignment: .top) {
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                if loading && listing == nil {
+                                    ForEach(0..<12, id: \.self) { _ in
+                                        skeletonTableRow
+                                    }
+                                } else if (listing?.entries.isEmpty ?? false) {
+                                    Text("Empty directory.")
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 36)
+                                } else {
+                                    ForEach(listing?.entries ?? []) { entry in
+                                        tableRow(entry)
+                                    }
+                                }
+                            }
+                        }
+                        if loading && listing != nil {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Text(message ?? "Status messages appear here.")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(message == nil ? .secondary : Palette.good)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
+                .padding(10)
+                .background(Color(red: 0.04, green: 0.05, blue: 0.07))
+        }
+    }
+
+    private var fileTableHeader: some View {
+        HStack(spacing: 12) {
+            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Size").frame(width: 88, alignment: .trailing)
+            Text("Type").frame(width: 110, alignment: .leading)
+            Text("Last modified").frame(width: 150, alignment: .leading)
+            Text("Permissions").frame(width: 86, alignment: .leading)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var skeletonTableRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "doc.text").foregroundStyle(.secondary)
+            RoundedRectangle(cornerRadius: 4).fill(.secondary.opacity(0.18)).frame(height: 12)
+            RoundedRectangle(cornerRadius: 4).fill(.secondary.opacity(0.18)).frame(width: 70, height: 12)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .redacted(reason: .placeholder)
+    }
+
+    private func tableRow(_ entry: RemoteFile) -> some View {
+        Button {
+            selectedPath = entry.path
+            open(entry)
+        } label: {
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: icon(entry))
+                        .foregroundStyle(entry.isDirectory ? Palette.warn : .secondary)
+                    Text(entry.name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(entry.isDirectory ? "" : Format.bytes(Double(entry.sizeBytes)))
+                    .frame(width: 88, alignment: .trailing)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Text(typeLabel(entry))
+                    .frame(width: 110, alignment: .leading)
+                    .foregroundStyle(.secondary)
+                Text(entry.modifiedAt.formatted(date: .numeric, time: .shortened))
+                    .frame(width: 150, alignment: .leading)
+                    .foregroundStyle(.secondary)
+                Text(entry.mode)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 86, alignment: .leading)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(selectedPath == entry.path ? Palette.accent.opacity(0.18) : Color.clear)
+        .contextMenu {
+            Button { open(entry) } label: { Label("Open", systemImage: entry.isDirectory ? "folder" : "doc.text") }
+            if !entry.isDirectory {
+                Button { download(entry) } label: { Label("Save", systemImage: "square.and.arrow.down") }
+            }
+            Button { renaming = entry; renameText = entry.name } label: { Label("Rename", systemImage: "pencil") }
+            Button(role: .destructive) { remove(entry) } label: { Label("Delete", systemImage: "trash") }
+        }
+    }
+
+    private func toggleTree(_ nodePath: String) {
+        if expandedPaths.contains(nodePath) {
+            expandedPaths.remove(nodePath)
+        } else {
+            expandedPaths.insert(nodePath)
+            if treeChildren[nodePath] == nil {
+                Task { await cacheTreeChildren(nodePath) }
+            }
         }
     }
 
@@ -159,8 +317,33 @@ struct FilesView: View {
             let result = try await files.list(target)
             listing = result
             path = result.path
+            selectedPath = nil
+            await updateTreeCache(for: result)
+            message = "Listing \(result.path) — \(result.entries.count) items"
         } catch {
             message = error.localizedDescription
+        }
+    }
+
+    private func cacheTreeChildren(_ target: String) async {
+        guard let files else { return }
+        do {
+            let result = try await files.list(target)
+            treeChildren[result.path] = result.entries.filter { $0.isDirectory }
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private func updateTreeCache(for result: RemoteListing) async {
+        treeChildren[result.path] = result.entries.filter { $0.isDirectory }
+        let chain = ancestorPaths(result.path)
+        for item in chain { expandedPaths.insert(item) }
+        guard let files else { return }
+        for item in chain where treeChildren[item] == nil {
+            if let parent = try? await files.list(item) {
+                treeChildren[parent.path] = parent.entries.filter { $0.isDirectory }
+            }
         }
     }
 
@@ -171,6 +354,7 @@ struct FilesView: View {
     }
 
     private func open(_ entry: RemoteFile) {
+        selectedPath = entry.path
         if entry.isDirectory {
             Task { await load(entry.path) }
             return
@@ -284,10 +468,90 @@ struct FilesView: View {
         return "doc.text"
     }
 
+    private func typeLabel(_ entry: RemoteFile) -> String {
+        if entry.isDirectory { return "Directory" }
+        if entry.isSymlink { return "Symbolic link" }
+        if let dot = entry.name.lastIndex(of: "."), dot > entry.name.startIndex {
+            return "\(entry.name[entry.name.index(after: dot)...].lowercased()) file"
+        }
+        return "File"
+    }
+
     private func detail(_ entry: RemoteFile) -> String {
         let when = entry.modifiedAt.formatted(date: .abbreviated, time: .shortened)
         if entry.isDirectory { return "\(entry.mode) · \(when)" }
         return "\(Format.bytes(Double(entry.sizeBytes))) · \(entry.mode) · \(when)"
+    }
+}
+
+private func ancestorPaths(_ path: String) -> [String] {
+    let parts = path.split(separator: "/").map(String.init)
+    var out = ["/"]
+    var current = ""
+    for part in parts {
+        current += "/" + part
+        out.append(current)
+    }
+    return out
+}
+
+private struct FileTreeNode: View {
+    let nodePath: String
+    let name: String
+    let depth: Int
+    let currentPath: String
+    let treeChildren: [String: [RemoteFile]]
+    @Binding var expandedPaths: Set<String>
+    let onSelect: (String) -> Void
+    let onToggle: (String) -> Void
+
+    var body: some View {
+        let isExpanded = expandedPaths.contains(nodePath)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                onSelect(nodePath)
+            } label: {
+                HStack(spacing: 4) {
+                    Button {
+                        onToggle(nodePath)
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                            .frame(width: 16, height: 16)
+                    }
+                    .buttonStyle(.plain)
+
+                    Image(systemName: depth == 0 ? "internaldrive" : (isExpanded ? "folder.fill" : "folder"))
+                        .foregroundStyle(depth == 0 ? .secondary : Palette.warn)
+                    Text(name)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .padding(.leading, CGFloat(depth * 14 + 6))
+                .padding(.trailing, 8)
+                .padding(.vertical, 4)
+                .background(currentPath == nodePath ? Palette.accent.opacity(0.18) : Color.clear)
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ForEach(treeChildren[nodePath] ?? []) { child in
+                    FileTreeNode(
+                        nodePath: child.path,
+                        name: child.name,
+                        depth: depth + 1,
+                        currentPath: currentPath,
+                        treeChildren: treeChildren,
+                        expandedPaths: $expandedPaths,
+                        onSelect: onSelect,
+                        onToggle: onToggle
+                    )
+                }
+            }
+        }
     }
 }
 

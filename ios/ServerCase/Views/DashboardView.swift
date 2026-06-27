@@ -86,6 +86,7 @@ struct DashboardView: View {
                         infoCard(status)
                         memoryCard(status)
                         disksCard(status)
+                        networkCard(status)
                     }
                 } else {
                     placeholder("Collecting status…")
@@ -139,11 +140,51 @@ struct DashboardView: View {
     private func infoCard(_ s: ServerStatus) -> some View {
         VStack(spacing: 8) {
             kv("Uptime", Format.uptime(s.uptimeSec))
-            kv("Network", "↓ \(Format.rate(s.netRxBytesPerSec))   ↑ \(Format.rate(s.netTxBytesPerSec))")
             kv("Kernel", s.kernel.isEmpty ? "–" : s.kernel)
             kv("Host", s.hostname.isEmpty ? "–" : s.hostname)
         }
         .card()
+    }
+
+    private func networkCard(_ s: ServerStatus) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Network").font(.headline)
+            HStack(spacing: 12) {
+                networkMetric("Down", "↓ \(Format.rate(s.netRxBytesPerSec))")
+                networkMetric("Up", "↑ \(Format.rate(s.netTxBytesPerSec))")
+            }
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+                ipBlock("NIC IPv4", s.ipv4)
+                ipBlock("NIC IPv6", s.ipv6)
+                ipBlock("External IPv4", s.publicIpv4.map { [$0] } ?? [])
+                ipBlock("External IPv6", s.publicIpv6.map { [$0] } ?? [])
+            }
+        }
+        .card()
+    }
+
+    private func networkMetric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.subheadline.weight(.medium))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func ipBlock(_ label: String, _ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            if items.isEmpty {
+                Text("–").foregroundStyle(.secondary)
+            } else {
+                ForEach(items, id: \.self) { item in
+                    Text(item)
+                        .font(.system(.caption2, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
     }
 
     private func memoryCard(_ s: ServerStatus) -> some View {

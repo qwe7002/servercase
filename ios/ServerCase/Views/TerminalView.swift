@@ -8,6 +8,7 @@ import SwiftUI
 /// instead of a SwiftUI text view.
 struct TerminalView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let server: ServerConfig
 
     @StateObject private var bridge = TerminalBridge()
@@ -16,6 +17,9 @@ struct TerminalView: View {
         ZStack(alignment: .topTrailing) {
             if let service = model.service(server.id) {
                 SwiftTermTerminalView(service: service, bridge: bridge)
+                    .padding(.horizontal, terminalHorizontalInset)
+                    .padding(.vertical, terminalVerticalInset)
+                    .background(Color(red: 0.04, green: 0.05, blue: 0.07))
                     .ignoresSafeArea(.keyboard, edges: .bottom)
             } else {
                 ContentUnavailableView(
@@ -46,6 +50,14 @@ struct TerminalView: View {
         .navigationTitle("Terminal")
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    private var terminalHorizontalInset: CGFloat {
+        horizontalSizeClass == .regular ? 14 : 6
+    }
+
+    private var terminalVerticalInset: CGFloat {
+        horizontalSizeClass == .regular ? 10 : 4
+    }
 }
 
 private final class TerminalBridge: ObservableObject {
@@ -62,10 +74,9 @@ private final class TerminalBridge: ObservableObject {
 
 /// Hides the terminal's on-screen extended keyboard (SwiftTerm's
 /// `inputAccessoryView`) whenever a hardware keyboard is attached, matching the
-/// OS behaviour of suppressing the software keyboard. SwiftTerm declares
-/// `inputAccessoryView` as `public` (not `open`), so we can't override it from a
-/// subclass — instead we toggle the property's value, saving SwiftTerm's
-/// accessory so it can be restored. Detection uses GameController's `GCKeyboard`.
+/// OS behaviour of suppressing the software keyboard. SwiftTerm exposes a
+/// setter method for its accessory storage because the UIKit override is
+/// read-only on newer SDKs. Detection uses GameController's `GCKeyboard`.
 private final class HardwareKeyboardMonitor {
     private weak var terminal: SwiftTerm.TerminalView?
     /// SwiftTerm's accessory, retained while it is detached so we can restore it.
@@ -92,7 +103,7 @@ private final class HardwareKeyboardMonitor {
         if let current = terminal.inputAccessoryView { savedAccessory = current }
         let desired: UIView? = GCKeyboard.coalesced != nil ? nil : savedAccessory
         if terminal.inputAccessoryView !== desired {
-            terminal.inputAccessoryView = desired
+            terminal.setInputAccessoryView(desired)
             terminal.reloadInputViews()
         }
     }

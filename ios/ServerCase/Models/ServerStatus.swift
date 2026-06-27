@@ -19,6 +19,10 @@ struct ServerStatus: Equatable {
     let disks: [DiskUsage]
     let netRxBytesPerSec: Double?
     let netTxBytesPerSec: Double?
+    let ipv4: [String]
+    let ipv6: [String]
+    let publicIpv4: String?
+    let publicIpv6: String?
     let uptimeSec: Double
     let loadAvg: (Double, Double, Double)
     let hostname: String

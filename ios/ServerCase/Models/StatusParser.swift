@@ -13,6 +13,7 @@ enum StatusParser {
         "echo \"===uptime===\"; cat /proc/uptime",
         "echo \"===load===\"; cat /proc/loadavg",
         "echo \"===disk===\"; df -k -P 2>/dev/null",
+        "echo \"===ip===\"; ip -o addr show scope global 2>/dev/null",
         "echo \"===host===\"; uname -r; hostname",
     ].joined(separator: "; ")
 
@@ -124,6 +125,25 @@ enum StatusParser {
             disks.append(DiskUsage(mount: c[c.count - 1], fs: fs, usedKb: used, totalKb: total))
         }
 
+        // IP addresses
+        var ipv4: [String] = []
+        var ipv6: [String] = []
+        for line in section(raw, "ip").split(separator: "\n") {
+            let parts = fields(String(line))
+            guard parts.count >= 4 else { continue }
+            let iface = parts[1]
+            if iface == "lo" || iface.hasPrefix("docker") || iface.hasPrefix("veth") || iface.hasPrefix("br-") {
+                continue
+            }
+            let address = String(parts[3].split(separator: "/").first ?? "")
+            guard !address.isEmpty else { continue }
+            if parts[2] == "inet" {
+                ipv4.append("\(iface) \(address)")
+            } else if parts[2] == "inet6" {
+                ipv6.append("\(iface) \(address)")
+            }
+        }
+
         // Host
         let hostLines = section(raw, "host").split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }
 
@@ -136,6 +156,10 @@ enum StatusParser {
             disks: disks,
             netRxBytesPerSec: netRx,
             netTxBytesPerSec: netTx,
+            ipv4: ipv4,
+            ipv6: ipv6,
+            publicIpv4: nil,
+            publicIpv6: nil,
             uptimeSec: uptime,
             loadAvg: load,
             hostname: hostLines.count > 1 ? hostLines[1] : "",
