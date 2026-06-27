@@ -159,6 +159,9 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         private var readerTask: Task<Void, Never>?
         private var openingTask: Task<Void, Never>?
         private var pendingWrites: [ArraySlice<UInt8>] = []
+        /// Latest size reported by the view; re-applied once the session opens,
+        /// since the initial layout's `sizeChanged` usually fires first.
+        private var pendingSize: (cols: Int, rows: Int)?
         private let keyboardMonitor = HardwareKeyboardMonitor()
 
         init(service: SSHService, bridge: TerminalBridge) {
@@ -217,6 +220,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
                         self.session = opened
                         self.openingTask = nil
                         self.flushPendingWrites()
+                        self.syncTerminalSize()
                     }
 
                     for try await chunk in opened.output {
@@ -267,9 +271,31 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         }
 
         func sizeChanged(source: SwiftTerm.TerminalView, newCols: Int, newRows: Int) {
+            pendingSize = (newCols, newRows)
             guard let id = session?.id else { return }
             let service = service
             Task { try? await service.resizeTerminal(id, cols: newCols, rows: newRows) }
+        }
+
+        /// Resizes the remote PTY to the view's current grid once the session is
+        /// live, so full-screen apps (vim, htop…) fill the whole terminal even
+        /// when the first layout pass happened before the SSH channel opened.
+        private func syncTerminalSize() {
+            guard let id = session?.id else { return }
+            let cols: Int
+            let rows: Int
+            if let pending = pendingSize {
+                cols = pending.cols
+                rows = pending.rows
+            } else if let t = terminal?.getTerminal() {
+                cols = t.cols
+                rows = t.rows
+            } else {
+                return
+            }
+            guard cols > 0, rows > 0 else { return }
+            let service = service
+            Task { try? await service.resizeTerminal(id, cols: cols, rows: rows) }
         }
 
         func setTerminalTitle(source: SwiftTerm.TerminalView, title: String) {}
