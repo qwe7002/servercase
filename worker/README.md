@@ -1,8 +1,7 @@
 # ServerCase Worker
 
 A [Cloudflare Worker](https://developers.cloudflare.com/workers/) that provides
-the **thin cloud side** of ServerCase. It does three things and prepares for a
-fourth:
+the **thin cloud side** of ServerCase:
 
 1. **Account login** — email + password, so a user owns their cloud data.
 2. **Config sync** — pull/push the secret-free `SyncPayload` across devices
@@ -11,6 +10,8 @@ fourth:
    [`probe/`](../probe) agent over per-host tokens, keeping latest + history.
 4. **Push** — threshold alerts (CPU / memory / disk) delivered to a user's
    registered devices over **Firebase Cloud Messaging**, fired on transition.
+5. **Management panel** — a self-contained web dashboard served at `/` (sign in,
+   live probe hosts, host tokens, push devices, config status).
 
 ```
 ServerCase app ──login──> Worker ──> D1 (accounts, config, probes, devices)
@@ -40,6 +41,7 @@ which types the D1 query layer and generates the migrations from the schema.
 | `src/db/schema.ts` | Drizzle schema — the single source of truth for tables. |
 | `src/db/client.ts` | `getDb(env)` — a typed Drizzle client over D1. |
 | `src/shared.ts` | Client-facing types (`SyncPayload`, `servercase.probe.v1`). |
+| `src/panel.html` | Management panel SPA (bundled as a text module, served at `/`). |
 | `drizzle.config.ts` | drizzle-kit config (schema → `migrations/`). |
 | `migrations/` | Generated D1 migrations (drizzle-kit) + drizzle `meta/`. |
 
@@ -75,6 +77,16 @@ Config (`wrangler.toml [vars]`):
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` / `ALERT_DISK_PCT` | `90` | Push alert thresholds (percent). |
 | `SESSION_SECRET` | *(secret)* | HMAC key for session tokens. **Required.** |
 | `FCM_SERVICE_ACCOUNT` | *(secret)* | Firebase service-account JSON for push. Optional. |
+
+## Management panel
+
+Open the worker's root URL (`https://<your-worker>/`) in a browser. It serves a
+self-contained dashboard (no build step — `src/panel.html` is bundled as a text
+module) that uses the same API and session token below: sign in or create an
+account, watch your probe hosts update live over the WebSocket, mint/revoke
+host tokens, manage push devices, and see the synced config revision. Because it
+is same-origin, it needs no CORS and stores only the session token in
+`localStorage`.
 
 ## API
 

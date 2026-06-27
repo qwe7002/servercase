@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
+# Bundle the management panel HTML as a text module (import it as a string).
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
 # D1 holds accounts, the per-user config snapshot, probe hosts/history and
 # registered push devices. Create it once with:
 #   wrangler d1 create servercase

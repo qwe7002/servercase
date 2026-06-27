@@ -14,6 +14,7 @@ import type { Env } from './env.ts';
 import { json } from './http.ts';
 import { preflight, withCors } from './cors.ts';
 import { Router } from './router.ts';
+import panelHtml from './panel.html';
 import { login, me, register } from './routes/auth.ts';
 import { getSync, putSync } from './routes/sync.ts';
 import { createProbe, deleteProbe, listProbes, probeHistory } from './routes/probes.ts';
@@ -26,8 +27,10 @@ export { UserHub } from './user_hub.ts';
 
 const router = new Router();
 
-// Health check.
-router.get('/', () => json({ service: 'servercase-worker', ok: true }));
+// Management panel (a self-contained SPA served at the root) + health check.
+router.get('/', () =>
+  new Response(panelHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+);
 router.get('/v1/health', () => json({ ok: true, now: Date.now() }));
 
 // Accounts.

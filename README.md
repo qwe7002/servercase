@@ -33,8 +33,9 @@ config across devices and read probe status; the probe agent streams
 backed by a per-host Durable Object (hibernating, so idle links are free), with
 an HTTP fallback. It also delivers **push notifications** for threshold alerts
 (CPU / memory / disk) over Firebase Cloud Messaging to a user's registered
-devices. Secrets stay in ServerCase: the worker stores only secret-free server
-definitions, and the Bitwarden API key is redacted before upload. See its
+devices, and serves a **web management panel** at `/` (sign in, live hosts,
+tokens, devices). Secrets stay in ServerCase: the worker stores only secret-free
+server definitions, and the Bitwarden API key is redacted before upload. See its
 [README](worker/README.md).
 
 The [`deploy/`](deploy) package automates putting a probe on a host: a single
