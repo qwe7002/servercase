@@ -11,13 +11,21 @@ data class Snippet(
     val command: String,
 )
 
-/** Periodic export/import of the configuration to a JSON file. */
+/**
+ * Optional connection to a ServerCase Worker for cloud config sync. The session
+ * token is not stored here — it lives in [CloudSessionRepository] and is never
+ * written to the synced payload. Only the non-secret URL/email/preferences live
+ * in settings, so they sync across devices.
+ */
 @Serializable
-data class AutoSyncSettings(
+data class CloudSettings(
     val enabled: Boolean = false,
-    val intervalMinutes: Int = 30,
-    /** Epoch ms of the last successful sync. */
-    val lastSyncedAt: Long? = null,
+    /** Base URL of the worker, e.g. https://worker.example.com */
+    val url: String = "",
+    /** Account email — display and login convenience (not a secret). */
+    val email: String = "",
+    /** Push the config to the cloud automatically after local changes. */
+    val autoPush: Boolean = false,
 )
 
 /**
@@ -50,7 +58,7 @@ data class ServerGroup(
 data class GlobalSettings(
     val bitwarden: BitwardenSettings = BitwardenSettings(),
     val snippets: List<Snippet> = emptyList(),
-    val autoSync: AutoSyncSettings = AutoSyncSettings(),
+    val cloud: CloudSettings = CloudSettings(),
     val groups: List<ServerGroup> = emptyList(),
 )
 

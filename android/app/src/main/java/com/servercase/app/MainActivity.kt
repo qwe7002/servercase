@@ -52,9 +52,12 @@ class MainActivity : ComponentActivity() {
                             onLock = { vm.lockVault() },
                             onPushAll = { vm.pushAllSecretsToVault() },
                             onTest = { vm.testVault() },
-                            onSyncNow = { vm.syncNow() },
-                            onExport = { vm.exportTo(it) },
-                            onImport = { vm.importFrom(it) },
+                            onCloudAuthenticate = { register, email, password ->
+                                vm.cloudAuthenticate(register, email, password)
+                            },
+                            onCloudPush = { vm.cloudPush() },
+                            onCloudPull = { vm.cloudPull() },
+                            onCloudSignOut = { vm.cloudSignOut() },
                         )
                     }
                     composable(

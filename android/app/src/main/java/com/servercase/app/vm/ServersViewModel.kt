@@ -1,9 +1,12 @@
 package com.servercase.app.vm
 
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.servercase.app.data.CloudClient
+import com.servercase.app.data.CloudException
+import com.servercase.app.data.CloudSession
+import com.servercase.app.data.CloudSessionRepository
 import com.servercase.app.data.ConnectionState
 import com.servercase.app.data.GlobalSettings
 import com.servercase.app.data.ServerConfig
@@ -20,7 +23,6 @@ import com.servercase.app.data.merging
 import com.servercase.app.data.secrets
 import com.servercase.app.data.ssh.SshClient
 import com.servercase.app.data.strippingSecrets
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,8 +30,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import java.io.File
 
 data class UiState(
     val servers: List<ServerConfig> = emptyList(),
@@ -38,6 +38,7 @@ data class UiState(
     val errors: Map<String, String> = emptyMap(),
     val settings: GlobalSettings = GlobalSettings(),
     val bitwardenStatus: BitwardenStatus? = null,
+    val cloudSession: CloudSession? = null,
     val settingsMessage: String? = null,
 )
 
@@ -45,13 +46,14 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = ServerRepository(app)
     private val settingsRepo = SettingsRepository(app)
+    private val cloudRepo = CloudSessionRepository(app)
     private val vault = BitwardenVault()
-    private val json = Json { prettyPrint = true; encodeDefaults = true; ignoreUnknownKeys = true }
+    private val cloud = CloudClient()
 
     private val clients = HashMap<String, SshClient>()
     private val collectors = HashMap<String, StatusParser.CollectorState>()
     private var pollJob: Job? = null
-    private var autoSyncJob: Job? = null
+    private var cloudPushJob: Job? = null
 
     /** Secrets loaded from the unlocked vault, merged into servers in memory. */
     private var vaultSecrets: Map<String, ServerSecrets> = emptyMap()
@@ -67,8 +69,10 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             settingsRepo.settings.collect { s ->
                 _ui.update { it.copy(settings = s) }
                 vault.configure(s.bitwarden)
-                restartAutoSync(s)
             }
+        }
+        viewModelScope.launch {
+            cloudRepo.session.collect { session -> _ui.update { it.copy(cloudSession = session) } }
         }
     }
 
@@ -104,6 +108,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun saveServers(list: List<ServerConfig>) {
         repo.save(if (vaultEnabled()) list.map { it.strippingSecrets() } else list)
+        scheduleCloudAutoPush()
     }
 
     // --- Connection -------------------------------------------------------
@@ -168,6 +173,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         // Re-persist servers so secrets are stripped (vault on) or restored (off).
         val list = _ui.value.servers
         repo.save(if (settings.bitwarden.enabled) list.map { it.strippingSecrets() } else list)
+        scheduleCloudAutoPush()
     }
 
     fun setMessage(message: String?) = _ui.update { it.copy(settingsMessage = message) }
@@ -218,66 +224,84 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // --- Auto-sync --------------------------------------------------------
-    private fun restartAutoSync(settings: GlobalSettings) {
-        autoSyncJob?.cancel()
-        if (!settings.autoSync.enabled) return
-        val minutes = settings.autoSync.intervalMinutes.coerceAtLeast(1)
-        autoSyncJob = viewModelScope.launch {
-            while (true) {
-                delay(minutes * 60_000L)
-                writeAutoSyncFile()
-            }
-        }
-    }
+    // --- Cloud sync -------------------------------------------------------
 
-    /** Bitwarden API key is a secret; never write it to the sync file. */
-    private fun redactedSettings(): GlobalSettings {
+    /** Bitwarden API key is a secret; never upload it. */
+    private fun buildPayload(): SyncPayload {
         val s = _ui.value.settings
-        return s.copy(bitwarden = s.bitwarden.copy(clientId = "", clientSecret = ""))
-    }
-
-    private fun writeAutoSyncFile(): Boolean = runCatching {
-        val payload = SyncPayload(
+        return SyncPayload(
             servers = _ui.value.servers.map { it.strippingSecrets() },
-            settings = redactedSettings(),
+            settings = s.copy(bitwarden = s.bitwarden.copy(clientId = "", clientSecret = "")),
         )
-        File(getApplication<Application>().filesDir, "servercase-sync.json")
-            .writeText(json.encodeToString(payload))
-        val s = _ui.value.settings
-        viewModelScope.launch {
-            settingsRepo.save(s.copy(autoSync = s.autoSync.copy(lastSyncedAt = System.currentTimeMillis())))
+    }
+
+    fun cloudAuthenticate(register: Boolean, email: String, password: String) = viewModelScope.launch {
+        val url = _ui.value.settings.cloud.url
+        try {
+            val res = if (register) cloud.register(url, email, password) else cloud.login(url, email, password)
+            cloudRepo.save(CloudSession(token = res.token, expiresAt = res.expiresAt, user = res.user))
+            val s = _ui.value.settings
+            updateSettings(s.copy(cloud = s.cloud.copy(email = res.user.email)))
+            setMessage(if (register) "Account created." else "Signed in.")
+        } catch (e: Exception) {
+            setMessage(cloudError(e))
         }
-        true
-    }.getOrDefault(false)
-
-    fun syncNow() = viewModelScope.launch {
-        setMessage(if (writeAutoSyncFile()) "Synced to app storage." else "Sync failed.")
     }
 
-    fun exportTo(uri: Uri) = viewModelScope.launch(Dispatchers.IO) {
-        runCatching {
-            val payload = SyncPayload(
-                servers = _ui.value.servers.map { it.strippingSecrets() },
-                settings = redactedSettings(),
-            )
-            getApplication<Application>().contentResolver.openOutputStream(uri)?.use {
-                it.write(json.encodeToString(payload).toByteArray())
-            }
-        }.onSuccess { setMessage("Exported configuration.") }
-            .onFailure { setMessage(it.message ?: "Export failed") }
+    fun cloudPush() = viewModelScope.launch { cloudPushInternal(showMessage = true) }
+
+    private suspend fun cloudPushInternal(showMessage: Boolean) {
+        val session = _ui.value.cloudSession
+        if (session == null || !session.isValid) {
+            if (showMessage) setMessage("Sign in to ServerCase Cloud first.")
+            return
+        }
+        try {
+            val res = cloud.putSync(_ui.value.settings.cloud.url, session.token, buildPayload(), session.syncVersion)
+            cloudRepo.save(session.copy(syncVersion = res.version, syncedAt = res.updatedAt))
+            if (showMessage) setMessage("Pushed to cloud (revision ${res.version}).")
+        } catch (e: Exception) {
+            if (showMessage) setMessage(cloudError(e))
+        }
     }
 
-    fun importFrom(uri: Uri) = viewModelScope.launch(Dispatchers.IO) {
-        runCatching {
-            val text = getApplication<Application>().contentResolver.openInputStream(uri)
-                ?.bufferedReader()?.use { it.readText() } ?: error("empty file")
-            val payload = json.decodeFromString<SyncPayload>(text)
-            repo.save(payload.servers)
-            settingsRepo.save(payload.settings)
-        }.onSuccess { setMessage("Configuration imported.") }
-            .onFailure { setMessage(it.message ?: "Import failed") }
+    fun cloudPull() = viewModelScope.launch {
+        val session = _ui.value.cloudSession
+        if (session == null || !session.isValid) {
+            setMessage("Sign in to ServerCase Cloud first.")
+            return@launch
+        }
+        try {
+            val res = cloud.getSync(_ui.value.settings.cloud.url, session.token)
+            repo.save(res.payload.servers)
+            settingsRepo.save(res.payload.settings)
+            cloudRepo.save(session.copy(syncVersion = res.version, syncedAt = res.updatedAt))
+            setMessage("Pulled from cloud.")
+        } catch (e: Exception) {
+            setMessage(cloudError(e))
+        }
     }
+
+    fun cloudSignOut() = viewModelScope.launch { cloudRepo.save(null) }
+
+    /** Debounced auto-push after local changes, when enabled and signed in. */
+    private fun scheduleCloudAutoPush() {
+        val cloudSettings = _ui.value.settings.cloud
+        val session = _ui.value.cloudSession
+        if (!cloudSettings.enabled || !cloudSettings.autoPush || session?.isValid != true) return
+        cloudPushJob?.cancel()
+        cloudPushJob = viewModelScope.launch {
+            delay(2_000L)
+            cloudPushInternal(showMessage = false)
+        }
+    }
+
+    private fun cloudError(e: Exception): String =
+        if (e is CloudException && e.status == 409) {
+            "The cloud copy changed since your last sync. Pull first, then push."
+        } else {
+            e.message ?: "Cloud request failed"
+        }
 
     override fun onCleared() {
         clients.values.forEach { it.disconnect() }

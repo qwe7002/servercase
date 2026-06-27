@@ -1,8 +1,5 @@
 package com.servercase.app.ui
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,9 +59,10 @@ fun SettingsScreen(
     onLock: () -> Unit,
     onPushAll: () -> Unit,
     onTest: () -> Unit,
-    onSyncNow: () -> Unit,
-    onExport: (Uri) -> Unit,
-    onImport: (Uri) -> Unit,
+    onCloudAuthenticate: (Boolean, String, String) -> Unit,
+    onCloudPush: () -> Unit,
+    onCloudPull: () -> Unit,
+    onCloudSignOut: () -> Unit,
 ) {
     val settings = state.settings
 
@@ -90,7 +88,7 @@ fun SettingsScreen(
             BitwardenSection(state, onUpdateSettings, onUnlock, onLock, onPushAll, onTest, onRefreshBitwarden)
             GroupsSection(settings, onUpdateSettings)
             SnippetsSection(settings, onUpdateSettings)
-            AutoSyncSection(settings, onUpdateSettings, onSyncNow, onExport, onImport)
+            CloudSection(state, onUpdateSettings, onCloudAuthenticate, onCloudPush, onCloudPull, onCloudSignOut)
             state.settingsMessage?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -322,52 +320,95 @@ private fun GroupsSection(settings: GlobalSettings, onUpdate: (GlobalSettings) -
 }
 
 @Composable
-private fun AutoSyncSection(
-    settings: GlobalSettings,
+private fun CloudSection(
+    state: UiState,
     onUpdate: (GlobalSettings) -> Unit,
-    onSyncNow: () -> Unit,
-    onExport: (Uri) -> Unit,
-    onImport: (Uri) -> Unit,
+    onAuthenticate: (Boolean, String, String) -> Unit,
+    onPush: () -> Unit,
+    onPull: () -> Unit,
+    onSignOut: () -> Unit,
 ) {
-    val sync = settings.autoSync
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri -> uri?.let(onExport) }
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri -> uri?.let(onImport) }
+    val settings = state.settings
+    val cloud = settings.cloud
+    val session = state.cloudSession
+    val signedIn = session != null && session.isValid
+    var email by remember { mutableStateOf(cloud.email) }
+    var password by remember { mutableStateOf("") }
 
-    SectionCard("Auto-sync") {
+    SectionCard("Cloud") {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Automatic config sync", Modifier.weight(1f))
-            Switch(checked = sync.enabled, onCheckedChange = {
-                onUpdate(settings.copy(autoSync = sync.copy(enabled = it)))
+            Text("ServerCase Cloud", Modifier.weight(1f))
+            Switch(checked = cloud.enabled, onCheckedChange = {
+                onUpdate(settings.copy(cloud = cloud.copy(enabled = it)))
             })
         }
         Text(
-            "Writes the server list and settings to a JSON file. Secrets are excluded — they sync through Bitwarden.",
+            "Sync your server list and settings to a ServerCase Worker. Secrets are never uploaded — they sync through Bitwarden — and your session token stays on this device.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
-        OutlinedTextField(
-            value = sync.intervalMinutes.toString(),
-            onValueChange = {
-                val n = it.toIntOrNull() ?: 1
-                onUpdate(settings.copy(autoSync = sync.copy(intervalMinutes = n.coerceAtLeast(1))))
-            },
-            label = { Text("Interval (minutes)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onSyncNow) { Text("Sync now") }
-            OutlinedButton(onClick = { exportLauncher.launch("servercase-sync.json") }) { Text("Export…") }
-            OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json")) }) { Text("Import…") }
-        }
-        sync.lastSyncedAt?.let {
-            Text("Last synced ${DateFormat.getDateTimeInstance().format(Date(it))}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+
+        if (cloud.enabled) {
+            OutlinedTextField(
+                value = cloud.url,
+                onValueChange = { onUpdate(settings.copy(cloud = cloud.copy(url = it))) },
+                label = { Text("Worker URL") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (signedIn) {
+                Text(
+                    "Signed in as ${session.user.email}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onPush) { Text("Push") }
+                    OutlinedButton(onClick = onPull) { Text("Pull") }
+                    OutlinedButton(onClick = onSignOut) { Text("Sign out") }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Auto-push on changes", Modifier.weight(1f))
+                    Switch(checked = cloud.autoPush, onCheckedChange = {
+                        onUpdate(settings.copy(cloud = cloud.copy(autoPush = it)))
+                    })
+                }
+                session.syncedAt?.let {
+                    Text(
+                        "Last synced ${DateFormat.getDateTimeInstance().format(Date(it))} · revision ${session.syncVersion ?: 0}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            } else {
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Email") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onAuthenticate(false, email.trim(), password) },
+                        enabled = cloud.url.isNotBlank() && email.isNotBlank() && password.isNotEmpty(),
+                    ) { Text("Sign in") }
+                    OutlinedButton(
+                        onClick = { onAuthenticate(true, email.trim(), password) },
+                        enabled = cloud.url.isNotBlank() && email.isNotBlank() && password.length >= 8,
+                    ) { Text("Create account") }
+                }
+            }
         }
     }
 }
