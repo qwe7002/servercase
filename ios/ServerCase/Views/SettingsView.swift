@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -31,9 +30,9 @@ struct SettingsView: View {
                     }
 
                     NavigationLink {
-                        SyncSettingsPage(draft: $draft, message: $message)
+                        CloudSettingsPage(draft: $draft, message: $message)
                     } label: {
-                        settingsRow("Sync", systemImage: "arrow.triangle.2.circlepath", detail: syncDetail)
+                        settingsRow("Cloud", systemImage: "icloud", detail: cloudDetail)
                     }
                 }
 
@@ -61,8 +60,9 @@ struct SettingsView: View {
         return status.state.rawValue.capitalized
     }
 
-    private var syncDetail: String {
-        draft.autoSync.enabled ? "Every \(draft.autoSync.intervalMinutes) min" : "Manual"
+    private var cloudDetail: String {
+        guard draft.cloud.enabled else { return "Off" }
+        return model.cloudSignedIn ? "Signed in" : "Signed out"
     }
 
     private func settingsRow(_ title: String, systemImage: String, detail: String) -> some View {
@@ -269,68 +269,119 @@ private struct SnippetsSettingsPage: View {
     }
 }
 
-private struct SyncSettingsPage: View {
+private struct CloudSettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @Binding var draft: GlobalSettings
     @Binding var message: String?
 
-    @State private var showExporter = false
-    @State private var showImporter = false
-    @State private var exportDoc: SyncDocument?
+    @State private var email = ""
+    @State private var password = ""
+    @State private var busy = false
 
     var body: some View {
         Form {
             Section {
-                Toggle("Automatic config sync", isOn: $draft.autoSync.enabled)
-                Stepper("Every \(draft.autoSync.intervalMinutes) min",
-                        value: $draft.autoSync.intervalMinutes, in: 1...720)
-                if let date = draft.autoSync.lastSyncedAt {
-                    Text("Last synced \(date.formatted())").font(.footnote).foregroundStyle(.secondary)
-                }
+                Toggle("ServerCase Cloud", isOn: $draft.cloud.enabled)
             } footer: {
-                Text("Writes the server list and settings to a JSON file. Secrets are excluded.")
+                Text("Sync your server list and settings to a ServerCase Worker. Secrets are never uploaded — they sync through Bitwarden — and your session token stays on this device.")
             }
 
-            Section {
-                Button("Sync now") {
-                    message = model.syncToAutoFile() ? "Synced to app storage." : "Sync failed."
+            if draft.cloud.enabled {
+                Section("Worker") {
+                    TextField("https://worker.example.com", text: $draft.cloud.url)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.URL)
                 }
-                Button("Export…") {
-                    exportDoc = (try? model.exportData()).map { SyncDocument(data: $0) }
-                    if exportDoc != nil { showExporter = true }
+
+                if model.cloudSignedIn {
+                    Section("Account") {
+                        HStack {
+                            Text("Signed in")
+                            Spacer()
+                            Text(model.cloudSession?.user.email ?? "").foregroundStyle(.secondary)
+                        }
+                        Button("Push to cloud") { push() }.disabled(busy)
+                        Button("Pull from cloud") { pull() }.disabled(busy)
+                        Toggle("Auto-push on changes", isOn: $draft.cloud.autoPush)
+                        Button("Sign out", role: .destructive) { model.cloudSignOut() }
+                        if let session = model.cloudSession, let at = session.syncedAt {
+                            Text("Last synced \(at.formatted()) · revision \(session.syncVersion ?? 0)")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Section("Sign in") {
+                        TextField("Email", text: $email)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .keyboardType(.emailAddress)
+                        SecureField("Password", text: $password)
+                        Button("Sign in") { authenticate(register: false) }
+                            .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.isEmpty)
+                        Button("Create account") { authenticate(register: true) }
+                            .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.count < 8)
+                    } footer: {
+                        Text("New accounts need a password of at least 8 characters.")
+                    }
                 }
-                Button("Import…") { showImporter = true }
             }
 
             if let message {
                 Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Sync")
+        .navigationTitle("Cloud")
         .navigationBarTitleDisplayMode(.inline)
-        .fileExporter(isPresented: $showExporter, document: exportDoc,
-                      contentType: .json, defaultFilename: "servercase-sync") { _ in }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json]) { result in
-            importConfig(result)
+    }
+
+    private func authenticate(register: Bool) {
+        busy = true; message = nil
+        Task {
+            do {
+                try await model.cloudAuthenticate(
+                    register: register,
+                    email: email.trimmingCharacters(in: .whitespaces),
+                    password: password)
+                password = ""
+                message = register ? "Account created." : "Signed in."
+            } catch {
+                message = errorText(error)
+            }
+            busy = false
         }
     }
 
-    private func importConfig(_ result: Result<URL, Error>) {
-        switch result {
-        case .success(let url):
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+    private func push() {
+        busy = true; message = nil
+        Task {
             do {
-                let data = try Data(contentsOf: url)
-                try model.importData(data)
-                draft = model.settings
-                message = "Configuration imported."
+                let version = try await model.cloudPushNow()
+                message = "Pushed to cloud (revision \(version))."
             } catch {
-                message = error.localizedDescription
+                message = errorText(error)
             }
-        case .failure(let error):
-            message = error.localizedDescription
+            busy = false
         }
+    }
+
+    private func pull() {
+        busy = true; message = nil
+        Task {
+            do {
+                try await model.cloudPull()
+                draft = model.settings
+                message = "Pulled from cloud."
+            } catch {
+                message = errorText(error)
+            }
+            busy = false
+        }
+    }
+
+    private func errorText(_ error: Error) -> String {
+        if let ce = error as? CloudError, ce.status == 409 {
+            return "The cloud copy changed since your last sync. Pull first, then push."
+        }
+        return error.localizedDescription
     }
 }
 
@@ -375,16 +426,3 @@ struct SnippetEditorView: View {
     }
 }
 
-/// Wraps the secret-free config JSON for `.fileExporter`.
-struct SyncDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    var data: Data
-
-    init(data: Data) { self.data = data }
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
-    }
-}

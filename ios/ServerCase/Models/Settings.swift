@@ -14,11 +14,18 @@ struct ServerGroup: Identifiable, Codable, Equatable, Hashable {
     var name: String
 }
 
-/// Periodic export/import of the configuration to a JSON file.
-struct AutoSyncSettings: Codable, Equatable {
+/// Optional connection to a ServerCase Worker for cloud config sync. The
+/// session token is not stored here — it lives in `CloudSessionStore` and is
+/// never written to the synced payload. Only the non-secret URL/email/
+/// preferences live in settings, so they sync across devices.
+struct CloudSettings: Codable, Equatable {
     var enabled: Bool = false
-    var intervalMinutes: Int = 30
-    var lastSyncedAt: Date? = nil
+    /// Base URL of the worker, e.g. https://worker.example.com
+    var url: String = ""
+    /// Account email — display and login convenience (not a secret).
+    var email: String = ""
+    /// Push the config to the cloud automatically after local changes.
+    var autoPush: Bool = false
 }
 
 /// Bitwarden keychain configuration. We speak the Bitwarden REST API directly
@@ -43,7 +50,7 @@ struct BitwardenSettings: Codable, Equatable {
 struct GlobalSettings: Codable, Equatable {
     var bitwarden = BitwardenSettings()
     var snippets: [Snippet] = []
-    var autoSync = AutoSyncSettings()
+    var cloud = CloudSettings()
     var groups: [ServerGroup] = []
 }
 

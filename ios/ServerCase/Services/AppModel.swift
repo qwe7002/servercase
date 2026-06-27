@@ -11,19 +11,22 @@ final class AppModel: ObservableObject {
     @Published var status: [UUID: ServerStatus] = [:]
     @Published var settings: GlobalSettings = SettingsStore.load()
     @Published var bitwardenStatus: BitwardenStatus?
+    @Published var cloudSession: CloudSession? = CloudSessionStore.load()
 
     let vault = BitwardenVault()
+    private let cloud = CloudService()
 
     private var services: [UUID: SSHService] = [:]
     private var collectors: [UUID: StatusParser.CollectorState] = [:]
     private var connectionTokens: [UUID: UUID] = [:]
     private var pollTask: Task<Void, Never>?
-    private var autoSyncTask: Task<Void, Never>?
+    private var cloudPushTask: Task<Void, Never>?
+    /// Set while applying a pulled snapshot, to suppress the auto-push echo.
+    private var applyingRemote = false
 
     init() {
         let bw = settings.bitwarden
         Task { await vault.configure(bw) }
-        restartAutoSync()
     }
 
     private var vaultEnabled: Bool { settings.bitwarden.enabled }
@@ -56,6 +59,7 @@ final class AppModel: ObservableObject {
     /// Persists the server list, stripping secrets when the vault owns them.
     private func saveServers() {
         ServerStore.save(vaultEnabled ? servers.map { $0.strippingSecrets() } : servers)
+        scheduleCloudAutoPush()
     }
 
     // MARK: Connection
@@ -152,7 +156,6 @@ final class AppModel: ObservableObject {
         Task { await vault.configure(bw) }
         // Re-persist so secrets are stripped (vault on) or restored (vault off).
         saveServers()
-        restartAutoSync()
     }
 
     func setBitwardenEnabled(_ enabled: Bool) {
@@ -198,39 +201,72 @@ final class AppModel: ObservableObject {
         try await vault.test()
     }
 
-    // MARK: Auto-sync
+    // MARK: Cloud sync
 
-    private func restartAutoSync() {
-        autoSyncTask?.cancel()
-        guard settings.autoSync.enabled else { return }
-        let minutes = max(1, settings.autoSync.intervalMinutes)
-        autoSyncTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(minutes) * 60_000_000_000)
-                if Task.isCancelled { break }
-                self?.syncToAutoFile()
-            }
-        }
+    var cloudSignedIn: Bool { cloudSession?.isValid == true }
+
+    /// Logs in (or registers) and stores the session locally.
+    func cloudAuthenticate(register: Bool, email: String, password: String) async throws {
+        let url = settings.cloud.url
+        let result = register
+            ? try await cloud.register(url: url, email: email, password: password)
+            : try await cloud.login(url: url, email: email, password: password)
+        let session = CloudSession(token: result.token, expiresAt: result.expiresAt, user: result.user)
+        cloudSession = session
+        CloudSessionStore.save(session)
+        var next = settings
+        next.cloud.email = result.user.email
+        updateSettings(next)
     }
 
+    /// Pushes the local config to the cloud. Returns the new revision.
     @discardableResult
-    func syncToAutoFile() -> Bool {
+    func cloudPushNow() async throws -> Int {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
         let payload = SyncService.makePayload(servers: servers, settings: settings)
-        guard let data = try? SyncService.encode(payload),
-              (try? data.write(to: SyncService.autoSyncURL)) != nil else { return false }
-        settings.autoSync.lastSyncedAt = Date()
-        SettingsStore.save(settings)
-        return true
+        let result = try await cloud.putSync(url: settings.cloud.url, token: session.token,
+                                             payload: payload, baseVersion: session.syncVersion)
+        updateCloudSyncState(session, version: result.version, at: result.updatedAt)
+        return result.version
     }
 
-    /// Secret-free snapshot for manual export via the document picker.
-    func exportData() throws -> Data {
-        try SyncService.encode(SyncService.makePayload(servers: servers, settings: settings))
+    /// Pulls the cloud config and replaces local servers + settings.
+    func cloudPull() async throws {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
+        let result = try await cloud.getSync(url: settings.cloud.url, token: session.token)
+        applyingRemote = true
+        servers = result.payload.servers
+        updateSettings(result.payload.settings)
+        applyingRemote = false
+        updateCloudSyncState(session, version: result.version, at: result.updatedAt)
     }
 
-    func importData(_ data: Data) throws {
-        let payload = try SyncService.decode(data)
-        servers = payload.servers
-        updateSettings(payload.settings)
+    func cloudSignOut() {
+        cloudSession = nil
+        CloudSessionStore.save(nil)
+    }
+
+    private func updateCloudSyncState(_ session: CloudSession, version: Int, at: Date) {
+        var updated = session
+        updated.syncVersion = version
+        updated.syncedAt = at
+        cloudSession = updated
+        CloudSessionStore.save(updated)
+    }
+
+    /// Debounced auto-push after local changes, when enabled and signed in.
+    private func scheduleCloudAutoPush() {
+        guard !applyingRemote, settings.cloud.enabled, settings.cloud.autoPush,
+              cloudSession?.isValid == true else { return }
+        cloudPushTask?.cancel()
+        cloudPushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if Task.isCancelled { return }
+            try? await self?.cloudPushNow()
+        }
     }
 }
