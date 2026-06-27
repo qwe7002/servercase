@@ -10,7 +10,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "servercase"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "29f91a49-f35b-4e78-967d-748b6b092f22"
 migrations_dir = "migrations"
 
 # Durable Objects (WebSocket Hibernation API, so idle connections cost nothing):
