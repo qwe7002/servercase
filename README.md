@@ -11,6 +11,7 @@ standalone, idiomatic implementation for its platform that shares the
 | iOS | SwiftUI (MVVM) | [Citadel](https://github.com/orlandos-nl/Citadel) | [`ios/`](ios) |
 | MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
 | Probe agent | Rust | local Linux `/proc` | [`probe/`](probe) |
+| Cloud worker | Cloudflare Workers + TypeScript + D1 | — | [`worker/`](worker) |
 
 The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
 server that lets an AI assistant manage your servers (run command, status,
@@ -20,9 +21,18 @@ only a URL and token and never sees secrets. Enable it under **Settings → AI**
 a read-only mode is available. See its [README](mcp/README.md).
 
 The [`probe/`](probe) package is a Rust host probe agent. It emits stable
-`servercase.probe.v1` JSON snapshots from Linux `/proc`; a future Cloudflare
-Worker can receive those snapshots to provide cloud-side status visibility
-without moving SSH credentials out of ServerCase.
+`servercase.probe.v1` JSON snapshots from Linux `/proc`; the [`worker/`](worker)
+Cloudflare Worker receives those snapshots to provide cloud-side status
+visibility without moving SSH credentials out of ServerCase.
+
+The [`worker/`](worker) package is that **Cloudflare Worker** — the thin cloud
+side. After logging in (email + password), a client can sync its secret-free
+config across devices and read probe status; the probe agent uploads
+`servercase.probe.v1` snapshots over per-host tokens. It also lays the
+groundwork for push notifications (device registration plus a delivery seam,
+not yet sending). Secrets stay in ServerCase: the worker stores only
+secret-free server definitions, and the Bitwarden API key is redacted before
+upload. See its [README](worker/README.md).
 
 ## Shared design
 

@@ -30,14 +30,23 @@ cargo run -- --interval 10 --public-ip
 `--public-ip` additionally looks up the host's public addresses (needs outbound
 internet and `curl`/`wget`; cached for ~5 minutes, off by default).
 
-## Cloudflare Worker Plan
+## Cloudflare Worker
 
-The cloud side should stay thin:
+The cloud side lives in [`../worker`](../worker) and stays thin:
 
-1. receive `servercase.probe.v1` JSON over HTTPS
-2. authenticate each probe with a per-host token
-3. store the latest snapshot and optional history
-4. expose a read API for ServerCase clients
+1. receives `servercase.probe.v1` JSON over HTTPS (`POST /v1/ingest`)
+2. authenticates each probe with a per-host token (`Authorization: Bearer`)
+3. stores the latest snapshot and optional history
+4. exposes a read API for ServerCase clients
 
 That keeps SSH credentials and local management inside ServerCase while allowing
-cloud status visibility later.
+cloud status visibility. To stream snapshots to it:
+
+```sh
+TOKEN=scp_...   # created in the app / via POST /v1/probes
+servercase-probe --interval 10 | while read -r line; do
+  curl -fsS -X POST https://<your-worker>/v1/ingest \
+    -H "Authorization: Bearer $TOKEN" \
+    -H 'content-type: application/json' -d "$line" >/dev/null
+done
+```

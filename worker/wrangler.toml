@@ -1,0 +1,25 @@
+name = "servercase-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 holds accounts, the per-user config snapshot, probe hosts/history and
+# registered push devices. Create it once with:
+#   wrangler d1 create servercase
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "servercase"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[vars]
+# Whether `POST /v1/auth/register` is open. Set to "0" to lock signups once
+# your accounts exist (you can still create accounts with wrangler/SQL).
+ALLOW_REGISTRATION = "1"
+# How many historical probe snapshots to keep per host (0 = keep only latest).
+PROBE_HISTORY_LIMIT = "240"
+
+# SESSION_SECRET signs login tokens (HMAC-SHA256). Never commit it — set it
+# with: wrangler secret put SESSION_SECRET
+# For `wrangler dev`, put it in .dev.vars instead.
