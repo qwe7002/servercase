@@ -6,6 +6,7 @@
  *   • GET  /v1/ingest/ws   — a WebSocket that streams one snapshot per text
  *                            frame, handled by the ProbeSocket Durable Object.
  */
+import { eq } from 'drizzle-orm';
 import type { Ctx } from '../router.ts';
 import { badRequest, bearer, json, unauthorized } from '../http.ts';
 import { sha256Hex } from '../ids.ts';
@@ -13,21 +14,23 @@ import { looksLikeProbeSnapshot } from '../shared.ts';
 import { storeSnapshot } from '../probe_store.ts';
 import { dispatchAlerts } from '../push/index.ts';
 import { publishSnapshot } from '../publish.ts';
+import { getDb } from '../db/client.ts';
+import { probeHosts } from '../db/schema.ts';
 
 interface AuthedHost {
   id: string;
-  user_id: string;
+  userId: string;
 }
 
 /** Resolves a probe token (header or `?token=`) to its host, or throws 401. */
 async function authProbe(ctx: Ctx): Promise<AuthedHost> {
   const token = bearer(ctx.req) ?? ctx.url.searchParams.get('token') ?? undefined;
   if (!token) throw unauthorized('missing probe token');
-  const host = await ctx.env.DB.prepare(
-    'SELECT id, user_id FROM probe_hosts WHERE token_hash = ?',
-  )
-    .bind(await sha256Hex(token))
-    .first<AuthedHost>();
+  const host = await getDb(ctx.env)
+    .select({ id: probeHosts.id, userId: probeHosts.userId })
+    .from(probeHosts)
+    .where(eq(probeHosts.tokenHash, await sha256Hex(token)))
+    .get();
   if (!host) throw unauthorized('invalid probe token');
   return host;
 }
@@ -49,8 +52,8 @@ export async function ingest(ctx: Ctx): Promise<Response> {
   await storeSnapshot(ctx.env, host.id, snapshot);
   ctx.exec.waitUntil(
     Promise.all([
-      publishSnapshot(ctx.env, host.user_id, host.id, snapshot),
-      dispatchAlerts(ctx.env, host.user_id, host.id, snapshot),
+      publishSnapshot(ctx.env, host.userId, host.id, snapshot),
+      dispatchAlerts(ctx.env, host.userId, host.id, snapshot),
     ]),
   );
   return json({ received: true, collectedAt: snapshot.collected_at_ms });
@@ -70,6 +73,6 @@ export async function openProbeSocket(ctx: Ctx): Promise<Response> {
   // because only this authenticated path can set them).
   const headers = new Headers(ctx.req.headers);
   headers.set('X-Sc-Host-Id', host.id);
-  headers.set('X-Sc-User-Id', host.user_id);
+  headers.set('X-Sc-User-Id', host.userId);
   return stub.fetch(new Request(ctx.req.url, { method: 'GET', headers }));
 }

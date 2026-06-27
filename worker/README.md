@@ -19,9 +19,10 @@ probe agent  ──probe.v1──> Worker
 
 Consistent with the rest of ServerCase, **secrets never reach the cloud**: SSH
 credentials and the Bitwarden vault stay in the app. Stored server definitions
-are secret-free and the Bitwarden API key is redacted before upload. It has **no
-runtime dependencies** — everything (PBKDF2 password hashing, HMAC session
-tokens, token hashing) uses the Workers Web Crypto API.
+are secret-free and the Bitwarden API key is redacted before upload. Crypto
+(PBKDF2 password hashing, HMAC session tokens, token hashing) uses the Workers
+Web Crypto API; the only runtime dependency is [Drizzle ORM](https://orm.drizzle.team),
+which types the D1 query layer and generates the migrations from the schema.
 
 ## Layout
 
@@ -36,8 +37,11 @@ tokens, token hashing) uses the Workers Web Crypto API.
 | `src/probe_store.ts` | Snapshot persistence shared by HTTP + WebSocket ingest. |
 | `src/publish.ts` | Routes an ingested snapshot to its owner's `UserHub`. |
 | `src/push/` | Notifier interface + no-op + `dispatchAlerts` seam (future-prep). |
+| `src/db/schema.ts` | Drizzle schema — the single source of truth for tables. |
+| `src/db/client.ts` | `getDb(env)` — a typed Drizzle client over D1. |
 | `src/shared.ts` | Client-facing types (`SyncPayload`, `servercase.probe.v1`). |
-| `migrations/` | D1 schema. |
+| `drizzle.config.ts` | drizzle-kit config (schema → `migrations/`). |
+| `migrations/` | Generated D1 migrations (drizzle-kit) + drizzle `meta/`. |
 
 ## Setup
 
@@ -48,7 +52,9 @@ wrangler login
 # Create the D1 database and paste the returned id into wrangler.toml.
 wrangler d1 create servercase
 
-# Apply the schema.
+# Apply the schema. Migrations are generated from src/db/schema.ts by
+# drizzle-kit (committed under migrations/) and applied by wrangler:
+npm run db:generate        # only after editing the schema
 npm run migrate:local      # for `wrangler dev`
 npm run migrate:remote     # for production
 

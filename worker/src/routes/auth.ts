@@ -1,4 +1,5 @@
 /** Account registration, login and "who am I" routes. */
+import { eq } from 'drizzle-orm';
 import type { Ctx } from '../router.ts';
 import { registrationAllowed } from '../env.ts';
 import { conflict, forbidden, json, readJson, requireString, unauthorized } from '../http.ts';
@@ -6,12 +7,8 @@ import { newId } from '../ids.ts';
 import { hashPassword, verifyPassword } from '../auth/password.ts';
 import { issueSession } from '../auth/jwt.ts';
 import { requireUser } from '../auth/session.ts';
-
-interface UserRow {
-  id: string;
-  email: string;
-  password_hash: string;
-}
+import { getDb } from '../db/client.ts';
+import { users } from '../db/schema.ts';
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -29,11 +26,9 @@ export async function register(ctx: Ctx): Promise<Response> {
   const id = newId();
   const passwordHash = await hashPassword(password);
   try {
-    await ctx.env.DB.prepare(
-      'INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
-    )
-      .bind(id, email, passwordHash, Date.now())
-      .run();
+    await getDb(ctx.env)
+      .insert(users)
+      .values({ id, email, passwordHash, createdAt: Date.now() });
   } catch (err) {
     // The unique index on email surfaces as a constraint failure.
     if (String(err).includes('UNIQUE')) throw conflict('email already registered');
@@ -49,16 +44,16 @@ export async function login(ctx: Ctx): Promise<Response> {
   const email = normalizeEmail(requireString(body, 'email'));
   const password = requireString(body, 'password');
 
-  const row = await ctx.env.DB.prepare(
-    'SELECT id, email, password_hash FROM users WHERE email = ?',
-  )
-    .bind(email)
-    .first<UserRow>();
+  const row = await getDb(ctx.env)
+    .select()
+    .from(users)
+    .where(eq(users.email, email))
+    .get();
 
   // Always run a verification to keep timing roughly constant whether or not
   // the account exists.
   const ok = row
-    ? await verifyPassword(password, row.password_hash)
+    ? await verifyPassword(password, row.passwordHash)
     : await verifyPassword(password, 'pbkdf2$210000$AAAA$AAAA');
   if (!row || !ok) throw unauthorized('invalid email or password');
 

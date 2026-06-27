@@ -9,11 +9,16 @@
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
     "migrate:local": "wrangler d1 migrations apply servercase --local",
     "migrate:remote": "wrangler d1 migrations apply servercase --remote"
   },
+  "dependencies": {
+    "drizzle-orm": "^0.44.2"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240909.0",
+    "drizzle-kit": "^0.31.1",
     "typescript": "^6.0.3",
     "wrangler": "^4.0.0"
   }

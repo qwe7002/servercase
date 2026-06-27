@@ -3,39 +3,36 @@
  * which mints a per-host bearer token the probe agent uses to upload snapshots.
  * The raw token is returned exactly once at creation.
  */
+import { and, desc, eq } from 'drizzle-orm';
 import type { Ctx } from '../router.ts';
 import { json, notFound, readJson, requireString } from '../http.ts';
 import { newId, newProbeToken, sha256Hex } from '../ids.ts';
 import { requireUser } from '../auth/session.ts';
+import { getDb } from '../db/client.ts';
+import { probeHosts, probeSnapshots } from '../db/schema.ts';
 
-interface HostRow {
-  id: string;
-  name: string;
-  created_at: number;
-  last_seen_at: number | null;
-  latest_snapshot: string | null;
-}
+type HostRow = typeof probeHosts.$inferSelect;
 
 function presentHost(row: HostRow) {
   return {
     id: row.id,
     name: row.name,
-    createdAt: row.created_at,
-    lastSeenAt: row.last_seen_at,
-    latest: row.latest_snapshot ? JSON.parse(row.latest_snapshot) : null,
+    createdAt: row.createdAt,
+    lastSeenAt: row.lastSeenAt,
+    latest: row.latestSnapshot ? JSON.parse(row.latestSnapshot) : null,
   };
 }
 
 /** GET /v1/probes — list the user's hosts with their latest snapshot. */
 export async function listProbes(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
-  const { results } = await ctx.env.DB.prepare(
-    `SELECT id, name, created_at, last_seen_at, latest_snapshot
-     FROM probe_hosts WHERE user_id = ? ORDER BY created_at`,
-  )
-    .bind(user.id)
-    .all<HostRow>();
-  return json({ hosts: (results ?? []).map(presentHost) });
+  const rows = await getDb(ctx.env)
+    .select()
+    .from(probeHosts)
+    .where(eq(probeHosts.userId, user.id))
+    .orderBy(probeHosts.createdAt)
+    .all();
+  return json({ hosts: rows.map(presentHost) });
 }
 
 /** POST /v1/probes — create a host and return its one-time probe token. */
@@ -46,12 +43,13 @@ export async function createProbe(ctx: Ctx): Promise<Response> {
 
   const id = newId();
   const token = newProbeToken();
-  await ctx.env.DB.prepare(
-    `INSERT INTO probe_hosts (id, user_id, name, token_hash, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  )
-    .bind(id, user.id, name, await sha256Hex(token), Date.now())
-    .run();
+  await getDb(ctx.env).insert(probeHosts).values({
+    id,
+    userId: user.id,
+    name,
+    tokenHash: await sha256Hex(token),
+    createdAt: Date.now(),
+  });
 
   // `token` is shown once here and never again — only its hash is stored.
   return json({ host: { id, name }, token }, 201);
@@ -60,39 +58,47 @@ export async function createProbe(ctx: Ctx): Promise<Response> {
 /** DELETE /v1/probes/:id — revoke a host and drop its history. */
 export async function deleteProbe(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
-  const result = await ctx.env.DB.prepare(
-    'DELETE FROM probe_hosts WHERE id = ? AND user_id = ?',
-  )
-    .bind(ctx.params.id, user.id)
-    .run();
-  if (!result.meta.changes) throw notFound('probe host not found');
+  const deleted = await getDb(ctx.env)
+    .delete(probeHosts)
+    .where(and(eq(probeHosts.id, ctx.params.id), eq(probeHosts.userId, user.id)))
+    .returning({ id: probeHosts.id });
+  if (deleted.length === 0) throw notFound('probe host not found');
   return json({ deleted: true });
 }
 
 /** GET /v1/probes/:id/history — recent snapshots for one host, newest first. */
 export async function probeHistory(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
+  const db = getDb(ctx.env);
 
-  const host = await ctx.env.DB.prepare(
-    'SELECT id FROM probe_hosts WHERE id = ? AND user_id = ?',
-  )
-    .bind(ctx.params.id, user.id)
-    .first<{ id: string }>();
+  const host = await db
+    .select({ id: probeHosts.id })
+    .from(probeHosts)
+    .where(and(eq(probeHosts.id, ctx.params.id), eq(probeHosts.userId, user.id)))
+    .get();
   if (!host) throw notFound('probe host not found');
 
-  const limit = Math.min(Math.max(Number.parseInt(ctx.url.searchParams.get('limit') ?? '50', 10) || 50, 1), 500);
-  const { results } = await ctx.env.DB.prepare(
-    `SELECT collected_at, received_at, snapshot
-     FROM probe_snapshots WHERE host_id = ? ORDER BY id DESC LIMIT ?`,
-  )
-    .bind(host.id, limit)
-    .all<{ collected_at: number; received_at: number; snapshot: string }>();
+  const limit = Math.min(
+    Math.max(Number.parseInt(ctx.url.searchParams.get('limit') ?? '50', 10) || 50, 1),
+    500,
+  );
+  const rows = await db
+    .select({
+      collectedAt: probeSnapshots.collectedAt,
+      receivedAt: probeSnapshots.receivedAt,
+      snapshot: probeSnapshots.snapshot,
+    })
+    .from(probeSnapshots)
+    .where(eq(probeSnapshots.hostId, host.id))
+    .orderBy(desc(probeSnapshots.id))
+    .limit(limit)
+    .all();
 
   return json({
     hostId: host.id,
-    snapshots: (results ?? []).map((r) => ({
-      collectedAt: r.collected_at,
-      receivedAt: r.received_at,
+    snapshots: rows.map((r) => ({
+      collectedAt: r.collectedAt,
+      receivedAt: r.receivedAt,
       snapshot: JSON.parse(r.snapshot),
     })),
   });

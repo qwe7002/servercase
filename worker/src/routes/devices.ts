@@ -3,40 +3,33 @@
  * their platform (APNs/FCM/Web Push) so the worker can reach them once delivery
  * is implemented. Registration is idempotent per (user, platform, token).
  */
+import { and, eq } from 'drizzle-orm';
 import type { Ctx } from '../router.ts';
 import { badRequest, json, notFound, optionalString, readJson, requireString } from '../http.ts';
 import { newId } from '../ids.ts';
 import { requireUser } from '../auth/session.ts';
+import { getDb } from '../db/client.ts';
+import { pushDevices } from '../db/schema.ts';
 import type { PushPlatform } from '../push/index.ts';
 
 const PLATFORMS: PushPlatform[] = ['apns', 'fcm', 'webpush'];
 
-interface DeviceRow {
-  id: string;
-  platform: string;
-  label: string | null;
-  created_at: number;
-  last_seen_at: number | null;
-}
-
 /** GET /v1/devices — list the user's registered push devices. */
 export async function listDevices(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
-  const { results } = await ctx.env.DB.prepare(
-    `SELECT id, platform, label, created_at, last_seen_at
-     FROM push_devices WHERE user_id = ? ORDER BY created_at`,
-  )
-    .bind(user.id)
-    .all<DeviceRow>();
-  return json({
-    devices: (results ?? []).map((r) => ({
-      id: r.id,
-      platform: r.platform,
-      label: r.label,
-      createdAt: r.created_at,
-      lastSeenAt: r.last_seen_at,
-    })),
-  });
+  const rows = await getDb(ctx.env)
+    .select({
+      id: pushDevices.id,
+      platform: pushDevices.platform,
+      label: pushDevices.label,
+      createdAt: pushDevices.createdAt,
+      lastSeenAt: pushDevices.lastSeenAt,
+    })
+    .from(pushDevices)
+    .where(eq(pushDevices.userId, user.id))
+    .orderBy(pushDevices.createdAt)
+    .all();
+  return json({ devices: rows });
 }
 
 /** POST /v1/devices — register (or refresh) a push token. */
@@ -50,37 +43,40 @@ export async function registerDevice(ctx: Ctx): Promise<Response> {
   const token = requireString(body, 'token');
   const label = optionalString(body, 'label') ?? null;
   const now = Date.now();
-  const id = newId();
+  const db = getDb(ctx.env);
 
   // Upsert on the (user, platform, token) unique index: re-registering the same
   // token just refreshes its label and last-seen time.
-  await ctx.env.DB.prepare(
-    `INSERT INTO push_devices (id, user_id, platform, token, label, created_at, last_seen_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, platform, token) DO UPDATE SET
-       label = excluded.label,
-       last_seen_at = excluded.last_seen_at`,
-  )
-    .bind(id, user.id, platform, token, label, now, now)
-    .run();
+  await db
+    .insert(pushDevices)
+    .values({ id: newId(), userId: user.id, platform, token, label, createdAt: now, lastSeenAt: now })
+    .onConflictDoUpdate({
+      target: [pushDevices.userId, pushDevices.platform, pushDevices.token],
+      set: { label, lastSeenAt: now },
+    });
 
-  const row = await ctx.env.DB.prepare(
-    'SELECT id FROM push_devices WHERE user_id = ? AND platform = ? AND token = ?',
-  )
-    .bind(user.id, platform, token)
-    .first<{ id: string }>();
+  const row = await db
+    .select({ id: pushDevices.id })
+    .from(pushDevices)
+    .where(
+      and(
+        eq(pushDevices.userId, user.id),
+        eq(pushDevices.platform, platform),
+        eq(pushDevices.token, token),
+      ),
+    )
+    .get();
 
-  return json({ device: { id: row?.id ?? id, platform, label } }, 201);
+  return json({ device: { id: row?.id, platform, label } }, 201);
 }
 
 /** DELETE /v1/devices/:id — unregister a push device. */
 export async function deleteDevice(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
-  const result = await ctx.env.DB.prepare(
-    'DELETE FROM push_devices WHERE id = ? AND user_id = ?',
-  )
-    .bind(ctx.params.id, user.id)
-    .run();
-  if (!result.meta.changes) throw notFound('device not found');
+  const deleted = await getDb(ctx.env)
+    .delete(pushDevices)
+    .where(and(eq(pushDevices.id, ctx.params.id), eq(pushDevices.userId, user.id)))
+    .returning({ id: pushDevices.id });
+  if (deleted.length === 0) throw notFound('device not found');
   return json({ deleted: true });
 }
