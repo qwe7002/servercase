@@ -31,10 +31,11 @@ side. After logging in (email + password), a client can sync its secret-free
 config across devices and read probe status; the probe agent streams
 `servercase.probe.v1` snapshots over per-host tokens — by default a WebSocket
 backed by a per-host Durable Object (hibernating, so idle links are free), with
-an HTTP fallback. It also lays the groundwork for push notifications (device
-registration plus a delivery seam, not yet sending). Secrets stay in
-ServerCase: the worker stores only secret-free server definitions, and the
-Bitwarden API key is redacted before upload. See its [README](worker/README.md).
+an HTTP fallback. It also delivers **push notifications** for threshold alerts
+(CPU / memory / disk) over Firebase Cloud Messaging to a user's registered
+devices. Secrets stay in ServerCase: the worker stores only secret-free server
+definitions, and the Bitwarden API key is redacted before upload. See its
+[README](worker/README.md).
 
 The [`deploy/`](deploy) package automates putting a probe on a host: a single
 `install.sh` fetches the agent and `websocat`, optionally registers the host to

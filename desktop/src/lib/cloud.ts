@@ -103,6 +103,12 @@ export const cloudApi = {
       method: 'DELETE',
       token,
     }),
+  registerDevice: (url: string, token: string, fcmToken: string, label?: string) =>
+    call<{ device: unknown }>(url, '/v1/devices', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ platform: 'fcm', token: fcmToken, label }),
+    }),
 };
 
 // ── High-level actions bound to the stores ──────────────────────────────────
@@ -148,4 +154,10 @@ export async function cloudPull(): Promise<void> {
   const res = await cloudApi.getSync(url, token);
   applySyncPayload(res.payload);
   useCloud.getState().setSync({ syncVersion: res.version, syncedAt: res.updatedAt });
+}
+
+/** Registers an FCM token with the worker for push alerts (best-effort). */
+export async function registerPushDevice(fcmToken: string): Promise<void> {
+  const { url, token } = session();
+  await cloudApi.registerDevice(url, token, fcmToken, 'ServerCase Desktop');
 }

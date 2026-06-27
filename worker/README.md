@@ -184,10 +184,11 @@ the Firebase service account: the worker signs a short-lived RS256 JWT with the
 account key (Web Crypto), exchanges it for an OAuth2 token (cached), and calls
 the FCM HTTP v1 API — no Firebase Admin SDK.
 
-**Client side (to wire in):** the apps obtain an FCM registration token via the
-Firebase SDK and `POST /v1/devices { platform: "fcm", token }`; a tap routes on
-`data.hostId`. That client integration needs a Firebase project config and is
-the remaining step.
+**Client side:** all three clients obtain an FCM registration token and
+`POST /v1/devices { platform: "fcm", token }` once signed in to Cloud — Android
+(`firebase-messaging`), iOS (Firebase SPM + APNs), and desktop (FCM web push,
+dev/served origins only). Each needs its Firebase project config; see the
+clients' READMEs.
 
 ## License
 

@@ -88,6 +88,21 @@ fetched back into memory on unlock and on demand when connecting.
 Secrets never reach the renderer's network: the renderer talks only to the
 main process over IPC, and the main process holds the SSH connections.
 
+## Push notifications (FCM)
+
+Alerts from the [worker](../worker) can be delivered over FCM web push. Copy
+`.env.example` to `.env` and fill in your Firebase **web app** config plus a Web
+Push key pair (VAPID); on the worker set the matching `FCM_SERVICE_ACCOUNT`
+secret. Once signed in to Cloud, the renderer registers its token with
+`POST /v1/devices` (see `src/lib/push.ts` + `public/firebase-messaging-sw.js`).
+
+> **Caveat:** web push needs a service worker, which requires an http(s) origin.
+> That works under `npm run dev`, but a **packaged Electron app loads over
+> `file://` where service workers are unavailable**, so background push is
+> skipped there. While the window is open, live status still arrives over the
+> `/v1/stream` WebSocket. A packaged build that needs background push would have
+> to serve the renderer over a custom app protocol.
+
 ## Develop
 
 ```bash
