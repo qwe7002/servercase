@@ -533,6 +533,7 @@ private struct FileTreeNode: View {
                 .padding(.leading, CGFloat(depth * 14 + 6))
                 .padding(.trailing, 8)
                 .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(currentPath == nodePath ? Palette.accent.opacity(0.18) : Color.clear)
             }
             .buttonStyle(.plain)
@@ -552,6 +553,7 @@ private struct FileTreeNode: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
