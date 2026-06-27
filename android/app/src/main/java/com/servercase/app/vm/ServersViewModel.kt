@@ -1,12 +1,14 @@
 package com.servercase.app.vm
 
 import android.app.Application
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.servercase.app.data.CloudClient
 import com.servercase.app.data.CloudException
 import com.servercase.app.data.CloudSession
 import com.servercase.app.data.CloudSessionRepository
+import com.servercase.app.data.PushTokenStore
 import com.servercase.app.data.ConnectionState
 import com.servercase.app.data.GlobalSettings
 import com.servercase.app.data.ServerConfig
@@ -47,6 +49,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = ServerRepository(app)
     private val settingsRepo = SettingsRepository(app)
     private val cloudRepo = CloudSessionRepository(app)
+    private val pushTokenStore = PushTokenStore(app)
     private val vault = BitwardenVault()
     private val cloud = CloudClient()
 
@@ -54,6 +57,10 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val collectors = HashMap<String, StatusParser.CollectorState>()
     private var pollJob: Job? = null
     private var cloudPushJob: Job? = null
+
+    /** Latest FCM token and the one we've already registered, to avoid repeats. */
+    private var fcmToken: String? = null
+    private var registeredFcmToken: String? = null
 
     /** Secrets loaded from the unlocked vault, merged into servers in memory. */
     private var vaultSecrets: Map<String, ServerSecrets> = emptyMap()
@@ -72,7 +79,16 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            cloudRepo.session.collect { session -> _ui.update { it.copy(cloudSession = session) } }
+            cloudRepo.session.collect { session ->
+                _ui.update { it.copy(cloudSession = session) }
+                maybeRegisterPushToken()
+            }
+        }
+        viewModelScope.launch {
+            pushTokenStore.token.collect { token ->
+                fcmToken = token
+                maybeRegisterPushToken()
+            }
         }
     }
 
@@ -283,6 +299,22 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cloudSignOut() = viewModelScope.launch { cloudRepo.save(null) }
+
+    /** Called with the current FCM token (e.g. on app start) to persist it. */
+    fun onFcmToken(token: String) = viewModelScope.launch { pushTokenStore.save(token) }
+
+    /** Registers the FCM token with the worker once signed in (idempotent). */
+    private fun maybeRegisterPushToken() {
+        val token = fcmToken ?: return
+        if (token == registeredFcmToken) return
+        val session = _ui.value.cloudSession
+        val cloudSettings = _ui.value.settings.cloud
+        if (session?.isValid != true || !cloudSettings.enabled || cloudSettings.url.isBlank()) return
+        viewModelScope.launch {
+            runCatching { cloud.registerDevice(cloudSettings.url, session.token, token, Build.MODEL) }
+                .onSuccess { registeredFcmToken = token }
+        }
+    }
 
     /** Debounced auto-push after local changes, when enabled and signed in. */
     private fun scheduleCloudAutoPush() {

@@ -57,5 +57,22 @@ Requires the Android SDK (set `sdk.dir` in `local.properties` or `ANDROID_HOME`)
 ./gradlew installDebug       # install on a connected device/emulator
 ```
 
+## Push notifications (FCM)
+
+Alerts from the [worker](../worker) are delivered over Firebase Cloud
+Messaging. To enable them, add your Firebase config:
+
+1. In the [Firebase console](https://console.firebase.google.com), add an
+   Android app with package `com.servercase.app`.
+2. Download `google-services.json` into `app/` (it is gitignored; see
+   [`app/google-services.json.example`](app/google-services.json.example)).
+3. On the worker, set the matching `FCM_SERVICE_ACCOUNT` secret.
+
+The app fetches its FCM token, registers it with the worker (`POST /v1/devices`)
+once signed in to Cloud, and shows alert notifications via
+`ServerCaseMessagingService`. **Without `google-services.json` the project still
+builds** — the google-services plugin is applied only when the file is present,
+and push simply stays off.
+
 > Host-key verification is currently promiscuous to keep first-run UX simple;
 > a production build should pin/confirm host keys.

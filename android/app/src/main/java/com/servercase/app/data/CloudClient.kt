@@ -35,6 +35,9 @@ class CloudClient {
     private data class PutSyncBody(val payload: SyncPayload, val baseVersion: Int? = null)
 
     @Serializable
+    private data class RegisterDeviceBody(val platform: String, val token: String, val label: String? = null)
+
+    @Serializable
     private data class ErrorResponse(val error: String? = null)
 
     suspend fun register(url: String, email: String, password: String): CloudAuthResponse =
@@ -54,6 +57,12 @@ class CloudClient {
     suspend fun putSync(url: String, token: String, payload: SyncPayload, baseVersion: Int?): CloudPutResult {
         val body = json.encodeToString(PutSyncBody(payload, baseVersion))
         return json.decodeFromString(request(url, "/v1/sync", "PUT", body, token))
+    }
+
+    /** Registers an FCM token so the worker can push alerts to this device. */
+    suspend fun registerDevice(url: String, sessionToken: String, fcmToken: String, label: String?) {
+        val body = json.encodeToString(RegisterDeviceBody("fcm", fcmToken, label))
+        request(url, "/v1/devices", "POST", body, sessionToken)
     }
 
     private suspend fun request(

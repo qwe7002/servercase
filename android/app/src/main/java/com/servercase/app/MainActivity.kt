@@ -1,9 +1,14 @@
 package com.servercase.app
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -11,6 +16,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.google.firebase.messaging.FirebaseMessaging
 import com.servercase.app.data.ConnectionState
 import com.servercase.app.ui.DashboardScreen
 import com.servercase.app.ui.FilesScreen
@@ -30,6 +36,19 @@ class MainActivity : ComponentActivity() {
                 val vm: ServersViewModel = viewModel()
                 val state by vm.ui.collectAsState()
                 val nav = rememberNavController()
+
+                val notificationPermission = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission(),
+                ) {}
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    // No-op without Firebase config (FirebaseApp won't be initialised).
+                    runCatching {
+                        FirebaseMessaging.getInstance().token.addOnSuccessListener { vm.onFcmToken(it) }
+                    }
+                }
 
                 NavHost(navController = nav, startDestination = "list") {
                     composable("list") {

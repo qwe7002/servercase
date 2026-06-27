@@ -7,3 +7,5 @@ local.properties
 .DS_Store
 captures/
 .cxx/
+# Firebase config (per-project secret); see app/google-services.json.example
+app/google-services.json
