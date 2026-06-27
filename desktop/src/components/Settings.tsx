@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { useCloud, hasValidSession } from '../store/cloud';
 import { cloudAuth, cloudPull, cloudPush, CloudError } from '../lib/cloud';
+import { CloudProbes } from './CloudProbes';
 
 type Section = 'bitwarden' | 'snippets' | 'sync' | 'cloud' | 'bridge';
 
@@ -734,6 +735,9 @@ function CloudSection() {
                   revision {sessionState.syncVersion}
                 </p>
               )}
+
+              <Separator />
+              <CloudProbes />
             </div>
           )}
         </>

@@ -4,6 +4,8 @@ export interface Env {
   DB: D1Database;
   /** Durable Object namespace backing the streaming WebSocket ingest. */
   PROBE_SOCKET: DurableObjectNamespace;
+  /** Durable Object namespace fanning live snapshots out to a user's clients. */
+  USER_HUB: DurableObjectNamespace;
   /** HMAC secret used to sign session tokens. Set via `wrangler secret put`. */
   SESSION_SECRET: string;
   /** "1"/"true" to allow public registration. Defaults to allowed. */

@@ -13,15 +13,20 @@ database_name = "servercase"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
-# Durable Object backing the streaming WebSocket ingest (one instance per host,
-# using the WebSocket Hibernation API so idle probe connections cost nothing).
+# Durable Objects (WebSocket Hibernation API, so idle connections cost nothing):
+#   ProbeSocket — one per host, receives the streaming probe ingest.
+#   UserHub     — one per user, fans live snapshots out to that user's clients.
 [[durable_objects.bindings]]
 name = "PROBE_SOCKET"
 class_name = "ProbeSocket"
 
+[[durable_objects.bindings]]
+name = "USER_HUB"
+class_name = "UserHub"
+
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["ProbeSocket"]
+new_sqlite_classes = ["ProbeSocket", "UserHub"]
 
 [vars]
 # Whether `POST /v1/auth/register` is open. Set to "0" to lock signups once

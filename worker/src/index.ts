@@ -4,6 +4,7 @@
  *   • Account login (email + password) so a user owns their data.
  *   • Config sync: pull/push the secret-free SyncPayload across devices.
  *   • Probe ingest: receive servercase.probe.v1 snapshots over per-host tokens.
+ *   • Live stream: push those snapshots to a user's clients over a WebSocket.
  *   • Push scaffolding: device registration + a delivery seam (not sending yet).
  *
  * SSH credentials and the Bitwarden vault never reach here — secrets stay in
@@ -17,9 +18,11 @@ import { login, me, register } from './routes/auth.ts';
 import { getSync, putSync } from './routes/sync.ts';
 import { createProbe, deleteProbe, listProbes, probeHistory } from './routes/probes.ts';
 import { ingest, openProbeSocket } from './routes/ingest.ts';
+import { openUserStream } from './routes/stream.ts';
 import { deleteDevice, listDevices, registerDevice } from './routes/devices.ts';
 
 export { ProbeSocket } from './probe_socket.ts';
+export { UserHub } from './user_hub.ts';
 
 const router = new Router();
 
@@ -35,6 +38,9 @@ router.get('/v1/auth/me', me);
 // Config sync.
 router.get('/v1/sync', getSync);
 router.put('/v1/sync', putSync);
+
+// Live status stream (session-authenticated WebSocket).
+router.get('/v1/stream', openUserStream);
 
 // Probe hosts (user-authenticated management) + ingest (probe-token auth).
 router.get('/v1/probes', listProbes);

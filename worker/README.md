@@ -32,7 +32,9 @@ tokens, token hashing) uses the Workers Web Crypto API.
 | `src/auth/` | PBKDF2 passwords, HMAC session tokens, session middleware. |
 | `src/routes/` | `auth`, `sync`, `probes`, `ingest`, `devices`. |
 | `src/probe_socket.ts` | `ProbeSocket` Durable Object: hibernatable WebSocket ingest. |
+| `src/user_hub.ts` | `UserHub` Durable Object: per-user live fan-out to clients. |
 | `src/probe_store.ts` | Snapshot persistence shared by HTTP + WebSocket ingest. |
+| `src/publish.ts` | Routes an ingested snapshot to its owner's `UserHub`. |
 | `src/push/` | Notifier interface + no-op + `dispatchAlerts` seam (future-prep). |
 | `src/shared.ts` | Client-facing types (`SyncPayload`, `servercase.probe.v1`). |
 | `migrations/` | D1 schema. |
@@ -91,6 +93,23 @@ renderer and a browser panel can call the API directly.
 `payload` is the secret-free `SyncPayload` (`version: 1`). Pass the `version`
 you last saw as `baseVersion` for optimistic locking — a concurrent change
 returns **409** so you can merge instead of clobbering another device.
+
+### Live status stream
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| `GET` | `/v1/stream` | session | **WebSocket**: live snapshots for all your hosts. |
+
+A logged-in client opens a WebSocket and receives a frame for every probe
+snapshot as it is ingested, across all of its hosts. Because browsers can't set
+headers on a WebSocket, the session token is passed as `?token=` (the
+`Authorization` header also works). It is backed by a per-user `UserHub`
+Durable Object (hibernating) that the ingest paths publish into. Messages:
+
+```jsonc
+{ "type": "hello", "at": 1719500000000 }
+{ "type": "snapshot", "hostId": "…", "at": 1719500000123, "snapshot": { /* servercase.probe.v1 */ } }
+```
 
 ### Probes
 

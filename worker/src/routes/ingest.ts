@@ -12,6 +12,7 @@ import { sha256Hex } from '../ids.ts';
 import { looksLikeProbeSnapshot } from '../shared.ts';
 import { storeSnapshot } from '../probe_store.ts';
 import { dispatchAlerts } from '../push/index.ts';
+import { publishSnapshot } from '../publish.ts';
 
 interface AuthedHost {
   id: string;
@@ -46,7 +47,12 @@ export async function ingest(ctx: Ctx): Promise<Response> {
   }
 
   await storeSnapshot(ctx.env, host.id, snapshot);
-  ctx.exec.waitUntil(dispatchAlerts(ctx.env, host.user_id, host.id, snapshot));
+  ctx.exec.waitUntil(
+    Promise.all([
+      publishSnapshot(ctx.env, host.user_id, host.id, snapshot),
+      dispatchAlerts(ctx.env, host.user_id, host.id, snapshot),
+    ]),
+  );
   return json({ received: true, collectedAt: snapshot.collected_at_ms });
 }
 

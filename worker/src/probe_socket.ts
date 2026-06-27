@@ -13,6 +13,7 @@ import type { Env } from './env.ts';
 import { looksLikeProbeSnapshot } from './shared.ts';
 import { storeSnapshot } from './probe_store.ts';
 import { dispatchAlerts } from './push/index.ts';
+import { publishSnapshot } from './publish.ts';
 
 interface SocketAttachment {
   hostId: string;
@@ -65,7 +66,10 @@ export class ProbeSocket implements DurableObject {
     }
 
     await storeSnapshot(this.env, hostId, body);
-    await dispatchAlerts(this.env, userId, hostId, body);
+    await Promise.all([
+      publishSnapshot(this.env, userId, hostId, body),
+      dispatchAlerts(this.env, userId, hostId, body),
+    ]);
     ws.send(JSON.stringify({ received: true, collectedAt: body.collected_at_ms }));
   }
 
