@@ -63,25 +63,27 @@ struct DashboardView: View {
         }
     }
 
-    /// Cards flow into as many ~340pt columns as the width allows: one on
-    /// iPhone, two or more in the wide iPad detail pane.
-    private let cardColumns = [GridItem(.adaptive(minimum: 340), spacing: 16)]
+    /// Cards flow into as many ~300pt columns as the width allows: one on
+    /// iPhone, two or more in the wide iPad detail pane. Each row's height is
+    /// its tallest card, and the cards' flexible max height (see `card()`)
+    /// stretches the shorter ones to match.
+    private let cardColumns = [GridItem(.adaptive(minimum: 300), spacing: 10)]
 
     private var overview: some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: 10) {
                 if case let .error(message) = state {
                     Text("Connection failed: \(message)")
                         .font(.callout).foregroundStyle(Palette.danger)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding().background(Palette.danger.opacity(0.12))
+                        .padding(10).background(Palette.danger.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
                 if !connected {
                     notConnected
                 } else if let status {
-                    LazyVGrid(columns: cardColumns, alignment: .leading, spacing: 16) {
+                    LazyVGrid(columns: cardColumns, alignment: .leading, spacing: 10) {
                         gauges(status)
                         infoCard(status)
                         memoryCard(status)
@@ -92,7 +94,7 @@ struct DashboardView: View {
                     placeholder("Collecting status…")
                 }
             }
-            .padding()
+            .padding(10)
             .frame(maxWidth: overviewMaxWidth, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
@@ -128,7 +130,7 @@ struct DashboardView: View {
     }
 
     private func gauges(_ s: ServerStatus) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             GaugeView(label: "CPU", value: s.cpuUsage,
                       caption: String(format: "load %.2f", s.loadAvg.0))
             GaugeView(label: "Memory", value: s.memPercent,
@@ -138,7 +140,7 @@ struct DashboardView: View {
     }
 
     private func infoCard(_ s: ServerStatus) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             kv("Uptime", Format.uptime(s.uptimeSec))
             kv("Kernel", s.kernel.isEmpty ? "–" : s.kernel)
             kv("Host", s.hostname.isEmpty ? "–" : s.hostname)
@@ -147,13 +149,13 @@ struct DashboardView: View {
     }
 
     private func networkCard(_ s: ServerStatus) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Network").font(.headline)
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 networkMetric("Down", "↓ \(Format.rate(s.netRxBytesPerSec))")
                 networkMetric("Up", "↑ \(Format.rate(s.netTxBytesPerSec))")
             }
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
                 ipBlock("NIC IPv4", s.ipv4)
                 ipBlock("NIC IPv6", s.ipv6)
                 ipBlock("External IPv4", s.publicIpv4.map { [$0] } ?? [])
@@ -188,7 +190,7 @@ struct DashboardView: View {
     }
 
     private func memoryCard(_ s: ServerStatus) -> some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Memory").font(.headline)
             UsageBarView(label: "RAM",
                          detail: "\(Format.kb(s.memUsedKb)) / \(Format.kb(s.memTotalKb))",
@@ -203,7 +205,7 @@ struct DashboardView: View {
     }
 
     private func disksCard(_ s: ServerStatus) -> some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Disks").font(.headline)
             if s.disks.isEmpty {
                 Text("No mounts reported.").foregroundStyle(.secondary)
@@ -252,8 +254,8 @@ private enum ServerDetailTab: CaseIterable, Identifiable {
 
 private extension View {
     func card() -> some View {
-        self.padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
+        self.padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 12))
     }
