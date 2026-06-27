@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
-  AutoSyncSettings,
   BitwardenSettings,
   CloudSettings,
   GlobalSettings,
@@ -22,11 +21,6 @@ const DEFAULTS: GlobalSettings = {
     itemPrefix: 'ServerCase/',
   },
   snippets: [],
-  autoSync: {
-    enabled: false,
-    intervalMinutes: 30,
-    filePath: '',
-  },
   bridge: {
     enabled: false,
     port: 8765,
@@ -44,7 +38,6 @@ interface SettingsState {
   settings: GlobalSettings;
 
   setBitwarden: (patch: Partial<BitwardenSettings>) => void;
-  setAutoSync: (patch: Partial<AutoSyncSettings>) => void;
   setBridge: (patch: Partial<GlobalSettings['bridge']>) => void;
   setCloud: (patch: Partial<CloudSettings>) => void;
 
@@ -70,13 +63,6 @@ export const useSettings = create<SettingsState>()(
           settings: {
             ...s.settings,
             bitwarden: { ...s.settings.bitwarden, ...patch },
-          },
-        })),
-      setAutoSync: (patch) =>
-        set((s) => ({
-          settings: {
-            ...s.settings,
-            autoSync: { ...s.settings.autoSync, ...patch },
           },
         })),
       setBridge: (patch) =>

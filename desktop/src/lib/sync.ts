@@ -30,25 +30,8 @@ export function buildSyncPayload(): SyncPayload {
   };
 }
 
-/** Replaces local servers + settings with a snapshot (from a file or the cloud). */
+/** Replaces local servers + settings with a snapshot (from the cloud). */
 export function applySyncPayload(payload: SyncPayload): void {
   useServers.getState().replaceServers(payload.servers);
   useSettings.getState().replaceSettings(payload.settings);
-}
-
-/** Writes the current (secret-free) config to the given sync file. */
-export async function runExport(filePath: string): Promise<number> {
-  const api = window.servercase;
-  if (!api) throw new Error('bridge unavailable');
-  const payload = buildSyncPayload();
-  await api.sync.export(filePath, payload);
-  useSettings.getState().setAutoSync({ lastSyncedAt: payload.exportedAt });
-  return payload.exportedAt;
-}
-
-/** Loads a sync file and replaces the local servers + settings with it. */
-export async function runImport(filePath: string): Promise<void> {
-  const api = window.servercase;
-  if (!api) throw new Error('bridge unavailable');
-  applySyncPayload(await api.sync.import(filePath));
 }

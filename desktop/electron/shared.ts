@@ -74,17 +74,6 @@ export interface Snippet {
   command: string;
 }
 
-/** Periodic export/import of the configuration to a JSON file on disk. */
-export interface AutoSyncSettings {
-  enabled: boolean;
-  /** Interval between automatic syncs, in minutes. */
-  intervalMinutes: number;
-  /** Absolute path of the sync file. Empty until the user picks one. */
-  filePath: string;
-  /** Epoch ms of the last successful sync, if any. */
-  lastSyncedAt?: number;
-}
-
 export interface BitwardenSettings {
   /**
    * When enabled, server login credentials (username, password, private key,
@@ -149,7 +138,6 @@ export interface Group {
 export interface GlobalSettings {
   bitwarden: BitwardenSettings;
   snippets: Snippet[];
-  autoSync: AutoSyncSettings;
   bridge: BridgeSettings;
   cloud: CloudSettings;
   groups: Group[];
@@ -198,9 +186,9 @@ export interface BitwardenStatus {
 }
 
 /**
- * Snapshot exchanged with the sync file. Secrets are deliberately excluded:
- * with Bitwarden they sync through the vault, and without Bitwarden they are
- * intentionally not portable.
+ * Secret-free configuration snapshot synced to the cloud (ServerCase Worker).
+ * Secrets are deliberately excluded: with Bitwarden they sync through the
+ * vault, and without Bitwarden they are intentionally not portable.
  */
 export interface SyncPayload {
   version: 1;
@@ -251,10 +239,6 @@ export const IpcChannels = {
   bwGet: 'sc:bw:get',
   bwList: 'sc:bw:list',
   bwDelete: 'sc:bw:delete',
-  // sync
-  syncExport: 'sc:sync:export',
-  syncImport: 'sc:sync:import',
-  syncPickFile: 'sc:sync:pickFile',
   // control bridge (for the MCP server)
   bridgeInfo: 'sc:bridge:info',
   bridgeSetEnabled: 'sc:bridge:setEnabled',

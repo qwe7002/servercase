@@ -10,7 +10,6 @@ import {
   type ServerSecrets,
   type ServerStatus,
   type SftpList,
-  type SyncPayload,
 } from './shared.js';
 
 /** The typed API surface exposed to the renderer as `window.servercase`. */
@@ -60,16 +59,6 @@ const api = {
       ipcRenderer.invoke(IpcChannels.bwList),
     delete: (serverId: string): Promise<void> =>
       ipcRenderer.invoke(IpcChannels.bwDelete, serverId),
-  },
-
-  // Config sync (JSON file)
-  sync: {
-    pickFile: (mode: 'open' | 'save'): Promise<string | null> =>
-      ipcRenderer.invoke(IpcChannels.syncPickFile, mode),
-    export: (filePath: string, payload: SyncPayload): Promise<void> =>
-      ipcRenderer.invoke(IpcChannels.syncExport, filePath, payload),
-    import: (filePath: string): Promise<SyncPayload> =>
-      ipcRenderer.invoke(IpcChannels.syncImport, filePath),
   },
 
   // Control bridge (MCP)

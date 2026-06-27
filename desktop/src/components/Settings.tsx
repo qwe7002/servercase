@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { BitwardenStatus, BridgeInfo, Snippet } from '../../electron/shared';
 import { useSettings } from '../store/settings';
 import { useServers } from '../store/servers';
-import { runExport, runImport } from '../lib/sync';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -38,7 +37,7 @@ import { useCloud, hasValidSession } from '../store/cloud';
 import { cloudAuth, cloudPull, cloudPush, CloudError } from '../lib/cloud';
 import { CloudProbes } from './CloudProbes';
 
-type Section = 'bitwarden' | 'snippets' | 'sync' | 'cloud' | 'bridge';
+type Section = 'bitwarden' | 'snippets' | 'cloud' | 'bridge';
 
 interface Props {
   onDone: () => void;
@@ -57,10 +56,9 @@ export function Settings({ onDone }: Props) {
         </DialogHeader>
 
         <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="bitwarden">Keychain</TabsTrigger>
             <TabsTrigger value="snippets">Snippets</TabsTrigger>
-            <TabsTrigger value="sync">Auto-sync</TabsTrigger>
             <TabsTrigger value="cloud">Cloud</TabsTrigger>
             <TabsTrigger value="bridge">AI</TabsTrigger>
           </TabsList>
@@ -69,7 +67,6 @@ export function Settings({ onDone }: Props) {
         <div className="-mr-2 flex-1 overflow-y-auto pr-2">
           {section === 'bitwarden' && <BitwardenSection />}
           {section === 'snippets' && <SnippetsSection />}
-          {section === 'sync' && <SyncSection />}
           {section === 'cloud' && <CloudSection />}
           {section === 'bridge' && <BridgeSection />}
         </div>
@@ -436,125 +433,6 @@ function SnippetRow({
           </Button>
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Auto-sync ─────────────────────────────────────────────────────────────
-
-function SyncSection() {
-  const autoSync = useSettings((s) => s.settings.autoSync);
-  const setAutoSync = useSettings((s) => s.setAutoSync);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const api = window.servercase;
-
-  const pick = async () => {
-    const file = await api?.sync.pickFile('save');
-    if (file) setAutoSync({ filePath: file });
-  };
-
-  const syncNow = async () => {
-    if (!autoSync.filePath) {
-      setMsg('Choose a sync file first.');
-      return;
-    }
-    setBusy(true);
-    setMsg(null);
-    try {
-      await runExport(autoSync.filePath);
-      setMsg('Synced.');
-    } catch (e) {
-      setMsg((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const restore = async () => {
-    const file = await api?.sync.pickFile('open');
-    if (!file) return;
-    setBusy(true);
-    setMsg(null);
-    try {
-      await runImport(file);
-      setMsg('Configuration restored from file.');
-    } catch (e) {
-      setMsg((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="grid gap-5 py-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <Label className="flex items-center gap-2">
-            <RefreshCw className="size-4" /> Automatic config sync
-          </Label>
-          <p className="text-sm text-muted-foreground">
-            Periodically writes your server list and settings to a JSON file.
-            Secrets are never included — they sync through Bitwarden when
-            enabled.
-          </p>
-        </div>
-        <Switch
-          checked={autoSync.enabled}
-          onCheckedChange={(v) => setAutoSync({ enabled: v })}
-        />
-      </div>
-
-      <Separator />
-
-      <div className="grid gap-3">
-        <div className="grid gap-2">
-          <Label>Sync file</Label>
-          <div className="flex gap-2">
-            <Input
-              readOnly
-              placeholder="No file chosen"
-              value={autoSync.filePath}
-              className="font-mono text-xs"
-            />
-            <Button variant="outline" onClick={pick}>
-              Choose…
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid w-40 gap-2">
-          <Label htmlFor="sync-interval">Interval (minutes)</Label>
-          <Input
-            id="sync-interval"
-            inputMode="numeric"
-            value={String(autoSync.intervalMinutes)}
-            onChange={(e) =>
-              setAutoSync({
-                intervalMinutes: Math.max(1, Number(e.target.value) || 1),
-              })
-            }
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={syncNow} disabled={busy}>
-            <RefreshCw /> Sync now
-          </Button>
-          <Button variant="outline" onClick={restore} disabled={busy}>
-            Restore from file…
-          </Button>
-        </div>
-
-        {autoSync.lastSyncedAt && (
-          <p className="text-xs text-muted-foreground">
-            Last synced {new Date(autoSync.lastSyncedAt).toLocaleString()}
-          </p>
-        )}
-      </div>
-
-      {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
     </div>
   );
 }
