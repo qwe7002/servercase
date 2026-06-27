@@ -12,7 +12,7 @@ struct FilesView: View {
     @State private var path = "."
     @State private var listing: RemoteListing?
     @State private var loading = false
-    @State private var message: String?
+    @State private var log: [LogEntry] = []
     @State private var selectedPath: String?
     @State private var treeChildren: [String: [RemoteFile]] = [:]
     @State private var expandedPaths: Set<String> = ["/"]
@@ -39,9 +39,10 @@ struct FilesView: View {
             } else {
                 compactBrowser
             }
-            if horizontalSizeClass != .regular, let message {
-                Text(message)
-                    .font(.caption).foregroundStyle(.secondary)
+            if horizontalSizeClass != .regular, let last = log.last {
+                Text(last.text)
+                    .font(.caption)
+                    .foregroundStyle(last.isError ? Palette.danger : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal).padding(.vertical, 6)
             }
@@ -158,13 +159,47 @@ struct FilesView: View {
                 }
             }
             Divider()
-            Text(message ?? "Status messages appear here.")
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(message == nil ? .secondary : Palette.good)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .topLeading)
-                .padding(10)
-                .background(Color(red: 0.04, green: 0.05, blue: 0.07))
+            logPanel
         }
+    }
+
+    /// FileZilla-style message log: every operation appends a timestamped line
+    /// instead of replacing the previous one, and the view auto-scrolls to the
+    /// newest entry.
+    private var logPanel: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if log.isEmpty {
+                        Text("Status messages appear here.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(log) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(entry.time, format: .dateTime.hour().minute().second())
+                                .foregroundStyle(.secondary)
+                            Text(entry.text)
+                                .foregroundStyle(entry.isError ? Palette.danger : Palette.good)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .id(entry.id)
+                    }
+                }
+                .font(.system(.caption, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+            }
+            .frame(height: 120)
+            .background(Color(red: 0.04, green: 0.05, blue: 0.07))
+            .onChange(of: log.count) { _, _ in
+                guard let last = log.last else { return }
+                withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
+        }
+    }
+
+    private func appendLog(_ text: String, isError: Bool = false) {
+        log.append(LogEntry(text: text, isError: isError))
     }
 
     private var fileTableHeader: some View {
@@ -319,9 +354,9 @@ struct FilesView: View {
             path = result.path
             selectedPath = nil
             await updateTreeCache(for: result)
-            message = "Listing \(result.path) — \(result.entries.count) items"
+            appendLog("Listing \(result.path) — \(result.entries.count) items")
         } catch {
-            message = error.localizedDescription
+            appendLog(error.localizedDescription, isError: true)
         }
     }
 
@@ -331,7 +366,7 @@ struct FilesView: View {
             let result = try await files.list(target)
             treeChildren[result.path] = result.entries.filter { $0.isDirectory }
         } catch {
-            message = error.localizedDescription
+            appendLog(error.localizedDescription, isError: true)
         }
     }
 
@@ -360,7 +395,7 @@ struct FilesView: View {
             return
         }
         guard entry.sizeBytes <= Self.maxEditBytes else {
-            message = "\(entry.name) is too large to edit — use Save to download it."
+            appendLog("\(entry.name) is too large to edit — use Save to download it.", isError: true)
             return
         }
         Task {
@@ -369,7 +404,7 @@ struct FilesView: View {
                 let content = try await files.readText(entry.path)
                 editing = EditingFile(entry: entry, content: content)
             } catch {
-                message = error.localizedDescription
+                appendLog(error.localizedDescription, isError: true)
             }
         }
     }
@@ -379,10 +414,10 @@ struct FilesView: View {
             guard let files, let content = editing?.content else { return }
             do {
                 try await files.writeText(file.entry.path, content)
-                message = "Saved \(file.entry.name)"
+                appendLog("Saved \(file.entry.name)")
                 editing = nil
             } catch {
-                message = error.localizedDescription
+                appendLog(error.localizedDescription, isError: true)
             }
         }
     }
@@ -394,7 +429,7 @@ struct FilesView: View {
                 try await files.remove(entry.path, isDirectory: entry.isDirectory)
                 await load(path)
             } catch {
-                message = error.localizedDescription
+                appendLog(error.localizedDescription, isError: true)
             }
         }
     }
@@ -409,7 +444,7 @@ struct FilesView: View {
                 try await files.rename(entry.path, to: files.join(path, name))
                 await load(path)
             } catch {
-                message = error.localizedDescription
+                appendLog(error.localizedDescription, isError: true)
             }
         }
     }
@@ -424,7 +459,7 @@ struct FilesView: View {
                 try await files.makeDirectory(files.join(path, name))
                 await load(path)
             } catch {
-                message = error.localizedDescription
+                appendLog(error.localizedDescription, isError: true)
             }
         }
     }
@@ -434,9 +469,9 @@ struct FilesView: View {
             guard let files else { return }
             do {
                 let url = try await files.download(entry)
-                message = "Saved to \(url.lastPathComponent) in Files"
+                appendLog("Saved to \(url.lastPathComponent) in Files")
             } catch {
-                message = error.localizedDescription
+                appendLog(error.localizedDescription, isError: true)
             }
         }
     }
@@ -451,14 +486,14 @@ struct FilesView: View {
                 do {
                     let data = try Data(contentsOf: url)
                     try await files.upload(data, to: path, name: url.lastPathComponent)
-                    message = "Uploaded \(url.lastPathComponent)"
+                    appendLog("Uploaded \(url.lastPathComponent)")
                     await load(path)
                 } catch {
-                    message = error.localizedDescription
+                    appendLog(error.localizedDescription, isError: true)
                 }
             }
         case .failure(let error):
-            message = error.localizedDescription
+            appendLog(error.localizedDescription, isError: true)
         }
     }
 
@@ -561,4 +596,12 @@ private struct EditingFile: Identifiable {
     let id = UUID()
     let entry: RemoteFile
     var content: String
+}
+
+/// One appended line in the file manager's status log.
+private struct LogEntry: Identifiable {
+    let id = UUID()
+    let time = Date()
+    let text: String
+    let isError: Bool
 }
