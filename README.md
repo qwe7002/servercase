@@ -81,7 +81,7 @@ See each subdirectory's `README.md` for build instructions.
 
 These are working v1 foundations. All three clients now ship global settings
 (a Bitwarden-backed keychain for credentials, reusable command snippets, and
-config auto-sync) and a file manager. The Bitwarden keychain is a **clean-room
+cloud config sync to the [`worker/`](worker)) and a file manager. The Bitwarden keychain is a **clean-room
 client** — each platform speaks the Bitwarden REST API directly and
 reimplements the account crypto (PBKDF2 / Argon2id → HKDF → AES‑CBC‑256 +
 HMAC‑SHA256, with per-cipher keys) using native primitives (Node `crypto`,

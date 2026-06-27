@@ -22,11 +22,10 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
     are never written to the sync file.
   - **Snippets** — reusable shell commands, runnable in any terminal from the
     snippet menu.
-  - **Auto-sync** — periodically export the server list and settings to a JSON
-    file (secrets excluded), with manual *Sync now* / *Restore* actions.
   - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
-    secret-free config across devices (optionally auto-pushing on change). The
-    session token stays on the device; it is never written to the sync file.
+    secret-free config across devices (optionally auto-pushing on change), plus
+    a live probe-host manager. The session token stays on the device; it is
+    never written to the synced payload.
   - **AI control (MCP bridge)** — a loopback, token-protected endpoint that lets
     the [`mcp/`](../mcp) server drive your *connected* servers (run commands,
     status, SFTP). Login and secrets never leave the app; the bridge only acts
@@ -72,12 +71,12 @@ electron/                Main process (Node) — owns all SSH sockets
 src/                     React renderer
   components/ui/         shadcn/ui primitives
   store/servers.ts       zustand store (persisted server list + vault sync)
-  store/settings.ts      zustand store (keychain / snippets / auto-sync / cloud)
+  store/settings.ts      zustand store (keychain / snippets / cloud)
   store/cloud.ts         zustand store (local-only worker session token)
   lib/sync.ts            build/apply of the secret-free config snapshot
   lib/cloud.ts           ServerCase Worker REST client + push/pull
   useConnections.ts      connection events + 3s status polling
-  useGlobalSettings.ts   vault configuration, secret loading, auto-sync, auto-push
+  useGlobalSettings.ts   vault configuration, secret loading, cloud auto-push
   components/            ServerList, ServerForm, Dashboard, StatusCard,
                          Terminal, Sftp, Settings
 ```

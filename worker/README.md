@@ -5,8 +5,8 @@ the **thin cloud side** of ServerCase. It does three things and prepares for a
 fourth:
 
 1. **Account login** — email + password, so a user owns their cloud data.
-2. **Config sync** — pull/push the secret-free `SyncPayload` (the same snapshot
-   the desktop app writes to its local sync file) across devices.
+2. **Config sync** — pull/push the secret-free `SyncPayload` across devices
+   (the desktop, iOS and Android clients all sign in here under Settings → Cloud).
 3. **Probe ingest** — receive `servercase.probe.v1` snapshots from the
    [`probe/`](../probe) agent over per-host tokens, keeping latest + history.
 4. **Push scaffolding** — clients can already register push tokens, and the

@@ -19,8 +19,9 @@ Jetpack Compose, Material 3 and SSHJ.
     latter via BouncyCastle). When off, secrets stay on-device and are never
     written to the sync file.
   - **Snippets** — reusable terminal commands.
-  - **Auto-sync** — periodic JSON export of servers + settings (secrets
-    excluded), with SAF export/import.
+  - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
+    secret-free config across devices (optionally auto-pushing on change). The
+    session token stays on-device and is never written to the synced payload.
 - Server list persisted locally with DataStore (kotlinx.serialization)
 
 ## Architecture (MVVM)
@@ -29,14 +30,16 @@ Jetpack Compose, Material 3 and SSHJ.
 data/
   ServerConfig.kt         Server model (@Serializable)
   ServerStatus.kt         Parsed status model
-  Settings.kt             GlobalSettings / Snippet / AutoSync / Bitwarden models
+  Settings.kt             GlobalSettings / Snippet / Cloud / Bitwarden models
   StatusParser.kt         STATUS_COMMAND + /proc parsing, CPU/net deltas
   ServerRepository.kt     DataStore-backed persistence
   SettingsRepository.kt   DataStore-backed settings persistence
+  CloudClient.kt          ServerCase Worker REST client (auth + sync)
+  CloudSession.kt         local-only worker session token (DataStore)
   bitwarden/BitwardenVault.kt  clean-room Bitwarden client (javax.crypto)
   ssh/SshClient.kt        SSHJ connection: exec (status) + shell (terminal)
   ssh/RemoteFiles.kt      command-based SFTP-style file operations
-vm/ServersViewModel.kt    StateFlow UiState, connections, vault, polling, sync
+vm/ServersViewModel.kt    StateFlow UiState, connections, vault, polling, cloud
 ui/
   theme/Theme.kt          Material3 dark theme + usage colors
   components/Indicators.kt Gauge + UsageBar

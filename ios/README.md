@@ -24,8 +24,9 @@ over SwiftNIO).
     latter via the Argon2Swift package). When off, secrets stay on-device and
     are never written to the sync file.
   - **Snippets** — reusable terminal commands.
-  - **Auto-sync** — periodic JSON export of servers + settings (secrets
-    excluded), with document-picker export/import.
+  - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
+    secret-free config across devices (optionally auto-pushing on change). The
+    session token stays on-device and is never written to the synced payload.
 - Server list persisted locally (Codable + UserDefaults)
 
 ## Architecture (MVVM)
@@ -34,16 +35,18 @@ over SwiftNIO).
 Models/
   ServerConfig.swift      Codable server model
   ServerStatus.swift      Parsed status model
-  Settings.swift          GlobalSettings / Snippet / AutoSync / Bitwarden models
+  Settings.swift          GlobalSettings / Snippet / Cloud / Bitwarden models
   StatusParser.swift      statusCommand + /proc parsing, CPU/net deltas
 Services/
   SSHService.swift        Citadel connection (actor): exec + raw PTY streams
   RemoteFiles.swift       command-based SFTP-style file operations
   BitwardenVault.swift    clean-room Bitwarden client (CommonCrypto + CryptoKit)
   SettingsStore.swift     UserDefaults settings persistence
-  SyncService.swift       secret-free config export/import
+  SyncService.swift       builds the secret-free config snapshot
+  CloudService.swift      ServerCase Worker REST client (auth + sync)
+  CloudSessionStore.swift local-only worker session token
   ServerStore.swift       UserDefaults persistence
-  AppModel.swift          @MainActor ObservableObject: state, vault, polling
+  AppModel.swift          @MainActor ObservableObject: state, vault, polling, cloud
 Views/
   RootView.swift          picks the layout by horizontal size class
   ServerListView          iPhone navigation-stack list
