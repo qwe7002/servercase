@@ -41,7 +41,7 @@ which types the D1 query layer and generates the migrations from the schema.
 | `src/db/schema.ts` | Drizzle schema — the single source of truth for tables. |
 | `src/db/client.ts` | `getDb(env)` — a typed Drizzle client over D1. |
 | `src/shared.ts` | Client-facing types (`SyncPayload`, `servercase.probe.v1`). |
-| `src/panel.html` | Management panel SPA (bundled as a text module, served at `/`). |
+| `panel/` | Management panel — React + shadcn/ui SPA, built to `panel/dist`. |
 | `drizzle.config.ts` | drizzle-kit config (schema → `migrations/`). |
 | `migrations/` | Generated D1 migrations (drizzle-kit) + drizzle `meta/`. |
 
@@ -64,8 +64,9 @@ npm run migrate:remote     # for production
 wrangler secret put SESSION_SECRET
 # For local dev, put it in .dev.vars instead:  SESSION_SECRET=dev-secret
 
+npm run build:panel        # build the management panel into panel/dist
 npm run dev                # local
-npm run deploy             # production
+npm run deploy             # production (builds the panel first)
 ```
 
 Config (`wrangler.toml [vars]`):
@@ -81,12 +82,15 @@ Config (`wrangler.toml [vars]`):
 ## Management panel
 
 Open the worker's root URL (`https://<your-worker>/`) in a browser. It serves a
-self-contained dashboard (no build step — `src/panel.html` is bundled as a text
-module) that uses the same API and session token below: sign in or create an
-account, watch your probe hosts update live over the WebSocket, mint/revoke
-host tokens, manage push devices, and see the synced config revision. Because it
-is same-origin, it needs no CORS and stores only the session token in
-`localStorage`.
+**React + [shadcn/ui](https://ui.shadcn.com)** dashboard (in [`panel/`](panel),
+built to `panel/dist` and served via [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/);
+non-asset requests fall through to the API): sign in or create an account, watch
+your probe hosts update live over the WebSocket, mint/revoke host tokens, manage
+push devices, and see the synced config revision. Same-origin, so no CORS — only
+the session token is kept in `localStorage`.
+
+`npm run deploy` builds the panel first (via `predeploy` → `build:panel`); run
+`npm run build:panel` by hand for a `wrangler dev` session.
 
 ## API
 

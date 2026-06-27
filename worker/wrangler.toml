@@ -3,11 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# Bundle the management panel HTML as a text module (import it as a string).
-[[rules]]
-type = "Text"
-globs = ["**/*.html"]
-fallthrough = true
+# Management panel: a React + shadcn SPA built to panel/dist and served as
+# static assets. Requests that don't match an asset fall through to the Worker
+# (so /v1/* is still handled below). Build it with `npm run build:panel`.
+[assets]
+directory = "./panel/dist"
 
 # D1 holds accounts, the per-user config snapshot, probe hosts/history and
 # registered push devices. Create it once with:

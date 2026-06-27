@@ -7,7 +7,9 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build:panel": "npm --prefix panel install && npm --prefix panel run build",
     "dev": "wrangler dev",
+    "predeploy": "npm run build:panel",
     "deploy": "wrangler deploy",
     "db:generate": "drizzle-kit generate",
     "migrate:local": "wrangler d1 migrations apply servercase --local",
