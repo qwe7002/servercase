@@ -7,3 +7,5 @@ DerivedData/
 xcuserdata/
 .swiftpm/
 .DS_Store
+# Firebase config (per-project secret); see GoogleService-Info.plist.example
+ServerCase/GoogleService-Info.plist

@@ -40,6 +40,12 @@ struct CloudService {
         return (res.version, Date(timeIntervalSince1970: res.updatedAt / 1000))
     }
 
+    /// Registers an FCM token so the worker can push alerts to this device.
+    func registerDevice(url: String, sessionToken: String, fcmToken: String) async throws {
+        let body = try Self.encoder.encode(RegisterDeviceBody(platform: "fcm", token: fcmToken))
+        _ = try await request(base: url, path: "/v1/devices", method: "POST", body: body, token: sessionToken)
+    }
+
     // MARK: - Internals
 
     private func authenticate(url: String, path: String, email: String, password: String) async throws -> AuthResult {
@@ -77,6 +83,7 @@ struct CloudService {
     }
 
     private struct Credentials: Codable { let email: String; let password: String }
+    private struct RegisterDeviceBody: Codable { let platform: String; let token: String }
     private struct PutSyncBody: Codable { let payload: SyncPayload; let baseVersion: Int? }
     private struct AuthResponse: Codable { let user: CloudUser; let token: String; let expiresAt: Double }
     private struct SyncResponse: Codable { let version: Int; let updatedAt: Double; let payload: SyncPayload }

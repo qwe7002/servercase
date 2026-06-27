@@ -23,10 +23,16 @@ final class AppModel: ObservableObject {
     private var cloudPushTask: Task<Void, Never>?
     /// Set while applying a pulled snapshot, to suppress the auto-push echo.
     private var applyingRemote = false
+    /// The FCM token we've already registered, to avoid repeats.
+    private var registeredPushToken: String?
 
     init() {
         let bw = settings.bitwarden
         Task { await vault.configure(bw) }
+        // Register the FCM token with the worker whenever it's (re)issued.
+        NotificationCenter.default.addObserver(forName: .fcmTokenReceived, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.registerPushToken() }
+        }
     }
 
     private var vaultEnabled: Bool { settings.bitwarden.enabled }
@@ -217,6 +223,22 @@ final class AppModel: ObservableObject {
         var next = settings
         next.cloud.email = result.user.email
         updateSettings(next)
+        registerPushToken()
+    }
+
+    /// Registers the current FCM token with the worker once signed in (idempotent).
+    func registerPushToken() {
+        guard settings.cloud.enabled, !settings.cloud.url.isEmpty,
+              let token = PushToken.current, token != registeredPushToken,
+              let session = cloudSession, session.isValid else { return }
+        Task {
+            do {
+                try await cloud.registerDevice(url: settings.cloud.url, sessionToken: session.token, fcmToken: token)
+                registeredPushToken = token
+            } catch {
+                // best-effort; retried on the next token refresh or sign-in
+            }
+        }
     }
 
     /// Pushes the local config to the cloud. Returns the new revision.

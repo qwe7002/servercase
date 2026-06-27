@@ -43,8 +43,9 @@ Services/
   BitwardenVault.swift    clean-room Bitwarden client (CommonCrypto + CryptoKit)
   SettingsStore.swift     UserDefaults settings persistence
   SyncService.swift       builds the secret-free config snapshot
-  CloudService.swift      ServerCase Worker REST client (auth + sync)
+  CloudService.swift      ServerCase Worker REST client (auth + sync + device)
   CloudSessionStore.swift local-only worker session token
+  AppDelegate.swift       Firebase/FCM setup + registration-token forwarding
   ServerStore.swift       UserDefaults persistence
   AppModel.swift          @MainActor ObservableObject: state, vault, polling, cloud
 Views/
@@ -71,9 +72,27 @@ The Xcode project is generated from `project.yml` with
 ```bash
 brew install xcodegen     # once
 cd clients/ios
-xcodegen generate         # produces ServerCase.xcodeproj (Citadel via SPM)
-open ServerCase.xcodeproj # build & run in Xcode (iOS 17+)
+xcodegen generate         # produces ServerCase.xcodeproj (SPM: Citadel, Firebase…)
+open ServerCase.xcodeproj # build & run in Xcode (iOS 18+)
 ```
+
+## Push notifications (FCM)
+
+Alerts from the [worker](../worker) arrive over FCM (APNs under the hood). To
+enable them:
+
+1. In the [Firebase console](https://console.firebase.google.com), add an iOS
+   app with bundle id `com.servercase.app` and upload your APNs auth key.
+2. Download `GoogleService-Info.plist` into `ServerCase/` (gitignored; see
+   [`GoogleService-Info.plist.example`](ServerCase/GoogleService-Info.plist.example)).
+3. Enable the Push Notifications capability for your signing team (the
+   `aps-environment` entitlement is in `ServerCase/ServerCase.entitlements`).
+4. On the worker, set the matching `FCM_SERVICE_ACCOUNT` secret.
+
+`AppDelegate` configures Firebase and forwards the registration token; once
+signed in to Cloud, `AppModel` registers it with the worker (`POST /v1/devices`).
+**Without `GoogleService-Info.plist` the app still runs** — Firebase is only
+configured when the file is present, so push stays off.
 
 > Host-key verification currently accepts any key to keep first-run UX simple;
 > a production build should pin/confirm host keys and store secrets in the
