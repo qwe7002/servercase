@@ -13,6 +13,13 @@ over SwiftNIO).
   snippet menu
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download) over the live connection
+- **Live Activity** (ActivityKit + WidgetKit) showing the live connection
+  status and key performance numbers (CPU, memory, network throughput) on the
+  Lock Screen and in the Dynamic Island, kept fresh from the 3s status poll
+- **Background connection** — a background-task assertion extends the SSH
+  connection and polling for a window after the app is backgrounded, and a
+  `BGAppRefreshTask` periodically wakes the app to reconnect, sample once and
+  refresh the Live Activity
 - **Adaptive layout** — a single navigation stack on iPhone and a
   sidebar + detail split view on iPad (`NavigationSplitView`), which also
   unlocks landscape on iPad
@@ -43,7 +50,14 @@ Services/
   SettingsStore.swift     UserDefaults settings persistence
   SyncService.swift       secret-free config export/import
   ServerStore.swift       UserDefaults persistence
+  LiveActivityManager.swift  ActivityKit: start/update/end the connection activity
+  BackgroundManager.swift    background-task assertion + BGAppRefreshTask
   AppModel.swift          @MainActor ObservableObject: state, vault, polling
+Shared/                   compiled into both the app and the widget extension
+  ServerActivityAttributes.swift  Live Activity attributes + content state
+ServerCaseWidget/         WidgetKit app-extension (Live Activity UI)
+  ServerCaseWidgetBundle.swift    @main widget bundle
+  ServerActivityWidget.swift      Lock Screen + Dynamic Island views
 Views/
   RootView.swift          picks the layout by horizontal size class
   ServerListView          iPhone navigation-stack list

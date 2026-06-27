@@ -20,10 +20,16 @@ final class AppModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var autoSyncTask: Task<Void, Never>?
 
+    private let liveActivity = LiveActivityManager.shared
+    private let background = BackgroundManager()
+    /// Server whose connection currently drives the Live Activity, if any.
+    private var trackedServerId: UUID?
+
     init() {
         let bw = settings.bitwarden
         Task { await vault.configure(bw) }
         restartAutoSync()
+        background.registerTasks { [weak self] in await self?.backgroundRefresh() }
     }
 
     private var vaultEnabled: Bool { settings.bitwarden.enabled }
@@ -79,6 +85,7 @@ final class AppModel: ObservableObject {
         connectionTokens[server.id] = token
         connState[server.id] = .connecting
         Task {
+            syncLiveActivity(server.id)
             var cfg = server
             if vaultEnabled, server.password == nil, server.privateKey == nil,
                let secrets = try? await vault.getSecrets(server.id.uuidString) {
@@ -99,6 +106,7 @@ final class AppModel: ObservableObject {
                 connState[server.id] = .error(error.localizedDescription)
                 services[server.id] = nil
             }
+            syncLiveActivity(server.id)
         }
     }
 
@@ -110,6 +118,7 @@ final class AppModel: ObservableObject {
         services[id] = nil
         collectors[id] = nil
         connState[id] = .disconnected
+        syncLiveActivity(id)
     }
 
     func service(_ id: UUID) -> SSHService? { services[id] }
@@ -118,6 +127,9 @@ final class AppModel: ObservableObject {
 
     func startPolling(_ id: UUID) {
         pollTask?.cancel()
+        // The polled server becomes the one shown in the Live Activity.
+        trackedServerId = id
+        syncLiveActivity(id)
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollOnce(id)
@@ -129,6 +141,10 @@ final class AppModel: ObservableObject {
     func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        if trackedServerId != nil {
+            liveActivity.end()
+            trackedServerId = nil
+        }
     }
 
     private func pollOnce(_ id: UUID) async {
@@ -138,9 +154,77 @@ final class AppModel: ObservableObject {
         do {
             let raw = try await service.run(StatusParser.statusCommand)
             status[id] = StatusParser.parse(raw, state: collector)
+            syncLiveActivity(id)
         } catch {
             // Transient; surfaced via connection state if the socket drops.
         }
+    }
+
+    // MARK: Live Activity + background
+
+    /// Pushes the current connection state and performance numbers to the Live
+    /// Activity, when `id` is the tracked server. Idempotent: starts the
+    /// activity if needed, otherwise updates the running one.
+    private func syncLiveActivity(_ id: UUID) {
+        guard id == trackedServerId,
+              let server = servers.first(where: { $0.id == id }) else { return }
+        liveActivity.start(server: server, state: activityState(id))
+    }
+
+    private func activityState(_ id: UUID) -> ServerActivityAttributes.State {
+        let s = status[id]
+        return ServerActivityAttributes.State(
+            phase: activityPhase(for: state(id)),
+            cpuUsage: s?.cpuUsage,
+            memPercent: s?.memPercent ?? 0,
+            memUsedKb: s?.memUsedKb ?? 0,
+            memTotalKb: s?.memTotalKb ?? 0,
+            netRxBytesPerSec: s?.netRxBytesPerSec,
+            netTxBytesPerSec: s?.netTxBytesPerSec,
+            loadOne: s?.loadAvg.0 ?? 0,
+            uptimeSec: s?.uptimeSec ?? 0,
+            updatedAt: Date()
+        )
+    }
+
+    private func activityPhase(for state: ConnectionState) -> ServerActivityAttributes.State.Phase {
+        switch state {
+        case .connected: return .connected
+        case .connecting: return .connecting
+        case .disconnected: return .disconnected
+        case .error: return .error
+        }
+    }
+
+    /// Reacts to app lifecycle changes: extend execution on background and
+    /// schedule a refresh; release the assertion on return to foreground.
+    func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            guard trackedServerId != nil else { return }
+            background.beginAssertion()
+            background.scheduleRefresh()
+        case .active:
+            background.endAssertion()
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    /// Invoked from a `BGAppRefreshTask`: reconnect if needed, take one sample
+    /// and refresh the Live Activity, all within the system-granted window.
+    func backgroundRefresh() async {
+        guard let id = trackedServerId,
+              let server = servers.first(where: { $0.id == id }) else { return }
+        if services[id] == nil {
+            connect(server) // connect() assigns a fresh connection token itself
+            // Give the handshake a brief moment before sampling.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        await pollOnce(id)
+        syncLiveActivity(id)
     }
 
     // MARK: Settings
