@@ -1,13 +1,16 @@
 /**
- * Probe ingest (authenticated by a per-host bearer token, not a user session).
- * The probe agent POSTs a servercase.probe.v1 snapshot; we store it as the
- * host's latest, append to bounded history, and hand it to the push layer.
+ * Probe ingest, authenticated by a per-host bearer token (not a user session).
+ * Two transports share the same auth and storage:
+ *
+ *   • POST /v1/ingest      — one snapshot per request (curl-friendly fallback).
+ *   • GET  /v1/ingest/ws   — a WebSocket that streams one snapshot per text
+ *                            frame, handled by the ProbeSocket Durable Object.
  */
 import type { Ctx } from '../router.ts';
-import { probeHistoryLimit } from '../env.ts';
-import { bearer, json, unauthorized } from '../http.ts';
+import { badRequest, bearer, json, unauthorized } from '../http.ts';
 import { sha256Hex } from '../ids.ts';
 import { looksLikeProbeSnapshot } from '../shared.ts';
+import { storeSnapshot } from '../probe_store.ts';
 import { dispatchAlerts } from '../push/index.ts';
 
 interface AuthedHost {
@@ -15,57 +18,52 @@ interface AuthedHost {
   user_id: string;
 }
 
-/** POST /v1/ingest — upload one probe snapshot. */
-export async function ingest(ctx: Ctx): Promise<Response> {
-  const token = bearer(ctx.req);
+/** Resolves a probe token (header or `?token=`) to its host, or throws 401. */
+async function authProbe(ctx: Ctx): Promise<AuthedHost> {
+  const token = bearer(ctx.req) ?? ctx.url.searchParams.get('token') ?? undefined;
   if (!token) throw unauthorized('missing probe token');
-
   const host = await ctx.env.DB.prepare(
     'SELECT id, user_id FROM probe_hosts WHERE token_hash = ?',
   )
     .bind(await sha256Hex(token))
     .first<AuthedHost>();
   if (!host) throw unauthorized('invalid probe token');
+  return host;
+}
 
-  // The probe emits compact JSON to stdout; accept it as the raw request body.
+/** POST /v1/ingest — upload one probe snapshot over HTTP. */
+export async function ingest(ctx: Ctx): Promise<Response> {
+  const host = await authProbe(ctx);
+
   let snapshot: unknown;
   try {
     snapshot = await ctx.req.json();
   } catch {
-    throw unauthorized('body must be valid probe JSON');
+    throw badRequest('body must be valid probe JSON');
   }
   if (!looksLikeProbeSnapshot(snapshot)) {
-    return json({ error: 'expected a servercase.probe.v1 snapshot' }, 400);
+    throw badRequest('expected a servercase.probe.v1 snapshot');
   }
 
-  const now = Date.now();
-  const raw = JSON.stringify(snapshot);
-  const limit = probeHistoryLimit(ctx.env);
-
-  const statements = [
-    ctx.env.DB.prepare(
-      'UPDATE probe_hosts SET latest_snapshot = ?, last_seen_at = ? WHERE id = ?',
-    ).bind(raw, now, host.id),
-  ];
-  if (limit > 0) {
-    statements.push(
-      ctx.env.DB.prepare(
-        'INSERT INTO probe_snapshots (host_id, collected_at, received_at, snapshot) VALUES (?, ?, ?, ?)',
-      ).bind(host.id, snapshot.collected_at_ms, now, raw),
-      // Trim to the newest `limit` rows for this host.
-      ctx.env.DB.prepare(
-        `DELETE FROM probe_snapshots
-         WHERE host_id = ?1
-           AND id NOT IN (
-             SELECT id FROM probe_snapshots WHERE host_id = ?1 ORDER BY id DESC LIMIT ?2
-           )`,
-      ).bind(host.id, limit),
-    );
-  }
-  await ctx.env.DB.batch(statements);
-
-  // Future push delivery runs out of band so ingest stays fast.
+  await storeSnapshot(ctx.env, host.id, snapshot);
   ctx.exec.waitUntil(dispatchAlerts(ctx.env, host.user_id, host.id, snapshot));
-
   return json({ received: true, collectedAt: snapshot.collected_at_ms });
+}
+
+/** GET /v1/ingest/ws — open a streaming WebSocket, routed to the host's DO. */
+export async function openProbeSocket(ctx: Ctx): Promise<Response> {
+  if ((ctx.req.headers.get('upgrade') ?? '').toLowerCase() !== 'websocket') {
+    throw badRequest('expected a WebSocket upgrade');
+  }
+  const host = await authProbe(ctx);
+
+  // One Durable Object per host keeps each host's socket and writes serialized.
+  const stub = ctx.env.PROBE_SOCKET.get(ctx.env.PROBE_SOCKET.idFromName(host.id));
+
+  // Forward the upgrade with the resolved identity (the DO trusts these headers
+  // because only this authenticated path can set them).
+  const headers = new Headers(ctx.req.headers);
+  headers.set('X-Sc-Host-Id', host.id);
+  headers.set('X-Sc-User-Id', host.user_id);
+  return stub.fetch(new Request(ctx.req.url, { method: 'GET', headers }));
 }

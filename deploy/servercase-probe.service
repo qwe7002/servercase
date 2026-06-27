@@ -1,0 +1,36 @@
+# Reference systemd unit for streaming the probe over a WebSocket.
+# install.sh generates this for you; included here for manual installs.
+#
+#   1. Put binaries at /opt/servercase-probe/{servercase-probe,websocat}
+#   2. Create /etc/servercase-probe/probe.env (chmod 600) with:
+#        PROBE_BIN=/opt/servercase-probe/servercase-probe
+#        WEBSOCAT_BIN=/opt/servercase-probe/websocat
+#        WS_URL=wss://worker.example.com/v1/ingest/ws
+#        TOKEN=scp_xxx
+#        INTERVAL=10
+#        PUBLIC_IP=          # or: --public-ip
+#   3. systemctl enable --now servercase-probe
+#
+# The `$$VAR` form passes a literal `$VAR` through systemd to /bin/sh, which
+# expands it from EnvironmentFile — so the token is never substituted into
+# systemd state.
+
+[Unit]
+Description=ServerCase probe -> cloud (WebSocket)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=servercase
+EnvironmentFile=/etc/servercase-probe/probe.env
+ExecStart=/bin/sh -c '"$$PROBE_BIN" --interval "$$INTERVAL" $$PUBLIC_IP | "$$WEBSOCAT_BIN" --ping-interval 25 --ping-timeout 60 -H "Authorization: Bearer $$TOKEN" "$$WS_URL"'
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

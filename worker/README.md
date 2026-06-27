@@ -31,6 +31,8 @@ tokens, token hashing) uses the Workers Web Crypto API.
 | `src/router.ts` | Tiny method + `:param` path router. |
 | `src/auth/` | PBKDF2 passwords, HMAC session tokens, session middleware. |
 | `src/routes/` | `auth`, `sync`, `probes`, `ingest`, `devices`. |
+| `src/probe_socket.ts` | `ProbeSocket` Durable Object: hibernatable WebSocket ingest. |
+| `src/probe_store.ts` | Snapshot persistence shared by HTTP + WebSocket ingest. |
 | `src/push/` | Notifier interface + no-op + `dispatchAlerts` seam (future-prep). |
 | `src/shared.ts` | Client-facing types (`SyncPayload`, `servercase.probe.v1`). |
 | `migrations/` | D1 schema. |
@@ -96,16 +98,31 @@ returns **409** so you can merge instead of clobbering another device.
 | `POST`   | `/v1/probes` | session | `{ name }` → `{ host, token }` (**token shown once**). |
 | `DELETE` | `/v1/probes/:id` | session | Revoke a host and its history. |
 | `GET`    | `/v1/probes/:id/history?limit=` | session | Recent snapshots, newest first. |
-| `POST`   | `/v1/ingest` | probe token | Upload one `servercase.probe.v1` snapshot. |
+| `POST`   | `/v1/ingest` | probe token | Upload one `servercase.probe.v1` snapshot over HTTP. |
+| `GET`    | `/v1/ingest/ws` | probe token | **WebSocket**: stream one snapshot per text frame. |
 
-Point the probe at the worker (a tiny wrapper around the agent's stdout):
+**WebSocket ingest (preferred).** The probe holds a single connection and sends
+one `servercase.probe.v1` line per text frame. It is backed by a
+`ProbeSocket` Durable Object — one instance per host — using the WebSocket
+[Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/),
+so idle connections cost nothing and pings are auto-answered. The token is sent
+in the `Authorization` header (or `?token=` for clients that can't set headers).
+
+Don't hand-roll a client: deploy the agent with [`deploy/install.sh`](../deploy),
+which streams the probe's stdout through `websocat`:
 
 ```sh
-TOKEN=scp_...   # from POST /v1/probes
+servercase-probe --interval 10 \
+  | websocat --ping-interval 25 -H "Authorization: Bearer $TOKEN" \
+      wss://<your-worker>/v1/ingest/ws
+```
+
+**HTTP fallback.** Where WebSockets are blocked, post each line instead:
+
+```sh
 servercase-probe --interval 10 | while read -r line; do
   curl -fsS -X POST https://<your-worker>/v1/ingest \
-    -H "Authorization: Bearer $TOKEN" \
-    -H 'content-type: application/json' \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
     -d "$line" >/dev/null
 done
 ```

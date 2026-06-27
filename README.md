@@ -12,6 +12,7 @@ standalone, idiomatic implementation for its platform that shares the
 | MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
 | Probe agent | Rust | local Linux `/proc` | [`probe/`](probe) |
 | Cloud worker | Cloudflare Workers + TypeScript + D1 | — | [`worker/`](worker) |
+| Probe deploy | `systemd` + `websocat` installer | — | [`deploy/`](deploy) |
 
 The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
 server that lets an AI assistant manage your servers (run command, status,
@@ -27,12 +28,18 @@ visibility without moving SSH credentials out of ServerCase.
 
 The [`worker/`](worker) package is that **Cloudflare Worker** — the thin cloud
 side. After logging in (email + password), a client can sync its secret-free
-config across devices and read probe status; the probe agent uploads
-`servercase.probe.v1` snapshots over per-host tokens. It also lays the
-groundwork for push notifications (device registration plus a delivery seam,
-not yet sending). Secrets stay in ServerCase: the worker stores only
-secret-free server definitions, and the Bitwarden API key is redacted before
-upload. See its [README](worker/README.md).
+config across devices and read probe status; the probe agent streams
+`servercase.probe.v1` snapshots over per-host tokens — by default a WebSocket
+backed by a per-host Durable Object (hibernating, so idle links are free), with
+an HTTP fallback. It also lays the groundwork for push notifications (device
+registration plus a delivery seam, not yet sending). Secrets stay in
+ServerCase: the worker stores only secret-free server definitions, and the
+Bitwarden API key is redacted before upload. See its [README](worker/README.md).
+
+The [`deploy/`](deploy) package automates putting a probe on a host: a single
+`install.sh` fetches the agent and `websocat`, optionally registers the host to
+mint its token, and installs a hardened `systemd` service that streams to the
+worker over WebSocket and reconnects on drop. See its [README](deploy/README.md).
 
 ## Shared design
 

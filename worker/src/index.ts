@@ -15,8 +15,10 @@ import { Router } from './router.ts';
 import { login, me, register } from './routes/auth.ts';
 import { getSync, putSync } from './routes/sync.ts';
 import { createProbe, deleteProbe, listProbes, probeHistory } from './routes/probes.ts';
-import { ingest } from './routes/ingest.ts';
+import { ingest, openProbeSocket } from './routes/ingest.ts';
 import { deleteDevice, listDevices, registerDevice } from './routes/devices.ts';
+
+export { ProbeSocket } from './probe_socket.ts';
 
 const router = new Router();
 
@@ -39,6 +41,7 @@ router.post('/v1/probes', createProbe);
 router.delete('/v1/probes/:id', deleteProbe);
 router.get('/v1/probes/:id/history', probeHistory);
 router.post('/v1/ingest', ingest);
+router.get('/v1/ingest/ws', openProbeSocket);
 
 // Push devices (future-prep).
 router.get('/v1/devices', listDevices);

@@ -2,6 +2,8 @@
 export interface Env {
   /** D1 database (accounts, sync, probes, push devices). */
   DB: D1Database;
+  /** Durable Object namespace backing the streaming WebSocket ingest. */
+  PROBE_SOCKET: DurableObjectNamespace;
   /** HMAC secret used to sign session tokens. Set via `wrangler secret put`. */
   SESSION_SECRET: string;
   /** "1"/"true" to allow public registration. Defaults to allowed. */
