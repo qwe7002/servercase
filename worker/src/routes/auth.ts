@@ -54,7 +54,7 @@ export async function login(ctx: Ctx): Promise<Response> {
   // the account exists.
   const ok = row
     ? await verifyPassword(password, row.passwordHash)
-    : await verifyPassword(password, 'pbkdf2$210000$AAAA$AAAA');
+    : await verifyPassword(password, 'pbkdf2$100000$AAAA$AAAA');
   if (!row || !ok) throw unauthorized('invalid email or password');
 
   const session = await issueSession(row.id, row.email, ctx.env.SESSION_SECRET);

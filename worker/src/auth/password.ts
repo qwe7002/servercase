@@ -7,7 +7,8 @@
  */
 import { base64UrlDecode, base64UrlEncode, timingSafeEqual } from '../ids.ts';
 
-const ITERATIONS = 210_000; // OWASP 2023 guidance for PBKDF2-SHA256
+// Cloudflare Workers' Web Crypto PBKDF2 implementation caps iterations at 100k.
+const ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const HASH_BITS = 256;
 
