@@ -22,6 +22,8 @@ struct FilesView: View {
     @State private var renameText = ""
     @State private var showNewFolder = false
     @State private var newFolderName = ""
+    /// Directory the new folder will be created in; nil means the current path.
+    @State private var newFolderParent: String?
     @State private var showImporter = false
 
     private static let maxEditBytes: Int64 = 512 * 1024
@@ -51,7 +53,7 @@ struct FilesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { showNewFolder = true } label: { Image(systemName: "folder.badge.plus") }
+                Button { newFolderParent = nil; showNewFolder = true } label: { Image(systemName: "folder.badge.plus") }
                 Button { showImporter = true } label: { Image(systemName: "arrow.up.doc") }
                 Button { Task { await load(path) } } label: { Image(systemName: "arrow.clockwise") }
             }
@@ -112,12 +114,16 @@ struct FilesView: View {
                         FileTreeNode(
                             nodePath: "/",
                             name: "/",
+                            file: nil,
                             depth: 0,
                             currentPath: listing?.path ?? path,
                             treeChildren: treeChildren,
                             expandedPaths: $expandedPaths,
                             onSelect: { target in Task { await load(target) } },
-                            onToggle: toggleTree
+                            onToggle: toggleTree,
+                            onRename: beginRename,
+                            onDelete: removeNode,
+                            onNewFolder: beginNewFolder
                         )
                     }
                     .padding(.vertical, 6)
@@ -434,6 +440,12 @@ struct FilesView: View {
         }
     }
 
+    /// Opens the rename alert for any entry (table row or directory-tree node).
+    private func beginRename(_ entry: RemoteFile) {
+        renaming = entry
+        renameText = entry.name
+    }
+
     private func confirmRename() {
         guard let entry = renaming, let files else { return }
         let name = renameText.trimmingCharacters(in: .whitespaces)
@@ -441,26 +453,81 @@ struct FilesView: View {
         guard !name.isEmpty, name != entry.name else { return }
         Task {
             do {
-                try await files.rename(entry.path, to: files.join(path, name))
-                await load(path)
+                let parent = parentDirectory(entry.path)
+                let dest = files.join(parent, name)
+                try await files.rename(entry.path, to: dest)
+                appendLog("Renamed \(entry.name) → \(name)")
+                await cacheTreeChildren(parent)
+                await reloadCurrentOrNavigate(old: entry.path, newPath: dest)
             } catch {
                 appendLog(error.localizedDescription, isError: true)
             }
         }
     }
 
+    /// Tree-aware delete: refreshes the parent's children and navigates out of
+    /// the current directory if it lived inside the removed one.
+    private func removeNode(_ entry: RemoteFile) {
+        Task {
+            guard let files else { return }
+            do {
+                try await files.remove(entry.path, isDirectory: entry.isDirectory)
+                appendLog("Deleted \(entry.name)")
+                let parent = parentDirectory(entry.path)
+                await cacheTreeChildren(parent)
+                await reloadCurrentOrNavigate(old: entry.path, newPath: nil)
+            } catch {
+                appendLog(error.localizedDescription, isError: true)
+            }
+        }
+    }
+
+    private func beginNewFolder(_ parent: String) {
+        newFolderParent = parent
+        showNewFolder = true
+    }
+
     private func createFolder() {
         guard let files else { return }
         let name = newFolderName.trimmingCharacters(in: .whitespaces)
         newFolderName = ""
+        let parent = newFolderParent ?? path
+        newFolderParent = nil
         guard !name.isEmpty else { return }
         Task {
             do {
-                try await files.makeDirectory(files.join(path, name))
-                await load(path)
+                try await files.makeDirectory(files.join(parent, name))
+                appendLog("Created \(files.join(parent, name))")
+                expandedPaths.insert(parent)
+                await cacheTreeChildren(parent)
+                await load(listing?.path ?? path)
             } catch {
                 appendLog(error.localizedDescription, isError: true)
             }
+        }
+    }
+
+    /// Drops the last component of an absolute path, returning "/" at the root.
+    private func parentDirectory(_ p: String) -> String {
+        let trimmed = (p.hasSuffix("/") && p != "/") ? String(p.dropLast()) : p
+        guard trimmed != "/" else { return "/" }
+        let parent = trimmed.split(separator: "/").dropLast().joined(separator: "/")
+        return parent.isEmpty ? "/" : "/" + parent
+    }
+
+    /// Reloads the current listing, or, when the affected path is the current
+    /// directory or one of its ancestors, follows it to `newPath` (rename) or
+    /// up to its parent (delete).
+    private func reloadCurrentOrNavigate(old: String, newPath: String?) async {
+        let current = listing?.path ?? path
+        if current == old || current.hasPrefix(old + "/") {
+            if let newPath {
+                await load(newPath + String(current.dropFirst(old.count)))
+            } else {
+                await load(parentDirectory(old))
+            }
+        } else {
+            await load(current)
         }
     }
 
@@ -533,12 +600,17 @@ private func ancestorPaths(_ path: String) -> [String] {
 private struct FileTreeNode: View {
     let nodePath: String
     let name: String
+    /// The directory entry this node represents, or nil for the synthetic root.
+    let file: RemoteFile?
     let depth: Int
     let currentPath: String
     let treeChildren: [String: [RemoteFile]]
     @Binding var expandedPaths: Set<String>
     let onSelect: (String) -> Void
     let onToggle: (String) -> Void
+    let onRename: (RemoteFile) -> Void
+    let onDelete: (RemoteFile) -> Void
+    let onNewFolder: (String) -> Void
 
     var body: some View {
         let isExpanded = expandedPaths.contains(nodePath)
@@ -576,18 +648,35 @@ private struct FileTreeNode: View {
                 .padding(.horizontal, 6)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button { onNewFolder(nodePath) } label: {
+                    Label("New Folder", systemImage: "folder.badge.plus")
+                }
+                if let file {
+                    Button { onRename(file) } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) { onDelete(file) } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+            }
 
             if isExpanded {
                 ForEach(treeChildren[nodePath] ?? []) { child in
                     FileTreeNode(
                         nodePath: child.path,
                         name: child.name,
+                        file: child,
                         depth: depth + 1,
                         currentPath: currentPath,
                         treeChildren: treeChildren,
                         expandedPaths: $expandedPaths,
                         onSelect: onSelect,
-                        onToggle: onToggle
+                        onToggle: onToggle,
+                        onRename: onRename,
+                        onDelete: onDelete,
+                        onNewFolder: onNewFolder
                     )
                 }
             }
