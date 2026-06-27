@@ -34,7 +34,13 @@ new_sqlite_classes = ["ProbeSocket", "UserHub"]
 ALLOW_REGISTRATION = "1"
 # How many historical probe snapshots to keep per host (0 = keep only latest).
 PROBE_HISTORY_LIMIT = "240"
+# Push alert thresholds (percent). An alert fires when a metric crosses these.
+ALERT_CPU_PCT = "90"
+ALERT_MEM_PCT = "90"
+ALERT_DISK_PCT = "90"
 
-# SESSION_SECRET signs login tokens (HMAC-SHA256). Never commit it — set it
-# with: wrangler secret put SESSION_SECRET
-# For `wrangler dev`, put it in .dev.vars instead.
+# Secrets — never commit; set with `wrangler secret put <NAME>` (or .dev.vars
+# for `wrangler dev`):
+#   SESSION_SECRET       signs login tokens (HMAC-SHA256). Required.
+#   FCM_SERVICE_ACCOUNT  the Firebase service-account JSON (whole file) used to
+#                        send FCM push. Optional — when unset, push is disabled.

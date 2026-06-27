@@ -9,8 +9,8 @@ fourth:
    (the desktop, iOS and Android clients all sign in here under Settings → Cloud).
 3. **Probe ingest** — receive `servercase.probe.v1` snapshots from the
    [`probe/`](../probe) agent over per-host tokens, keeping latest + history.
-4. **Push scaffolding** — clients can already register push tokens, and the
-   ingest path calls a delivery seam, but **no notifications are sent yet**.
+4. **Push** — threshold alerts (CPU / memory / disk) delivered to a user's
+   registered devices over **Firebase Cloud Messaging**, fired on transition.
 
 ```
 ServerCase app ──login──> Worker ──> D1 (accounts, config, probes, devices)
@@ -36,7 +36,7 @@ which types the D1 query layer and generates the migrations from the schema.
 | `src/user_hub.ts` | `UserHub` Durable Object: per-user live fan-out to clients. |
 | `src/probe_store.ts` | Snapshot persistence shared by HTTP + WebSocket ingest. |
 | `src/publish.ts` | Routes an ingested snapshot to its owner's `UserHub`. |
-| `src/push/` | Notifier interface + no-op + `dispatchAlerts` seam (future-prep). |
+| `src/push/` | FCM transport (`fcm.ts`), threshold rules (`alerts.ts`), `dispatchAlerts`. |
 | `src/db/schema.ts` | Drizzle schema — the single source of truth for tables. |
 | `src/db/client.ts` | `getDb(env)` — a typed Drizzle client over D1. |
 | `src/shared.ts` | Client-facing types (`SyncPayload`, `servercase.probe.v1`). |
@@ -72,7 +72,9 @@ Config (`wrangler.toml [vars]`):
 |-----|---------|---------|
 | `ALLOW_REGISTRATION` | `1` | Set `0` to close public signup. |
 | `PROBE_HISTORY_LIMIT` | `240` | History rows kept per host (`0` = latest only). |
+| `ALERT_CPU_PCT` / `ALERT_MEM_PCT` / `ALERT_DISK_PCT` | `90` | Push alert thresholds (percent). |
 | `SESSION_SECRET` | *(secret)* | HMAC key for session tokens. **Required.** |
+| `FCM_SERVICE_ACCOUNT` | *(secret)* | Firebase service-account JSON for push. Optional. |
 
 ## API
 
@@ -154,7 +156,14 @@ servercase-probe --interval 10 | while read -r line; do
 done
 ```
 
-### Push devices (future-prep)
+### Push notifications (FCM)
+
+Threshold alerts are delivered over **Firebase Cloud Messaging**. On each
+ingested snapshot the worker evaluates CPU / memory / per-mount disk against the
+`ALERT_*_PCT` thresholds and, on a *transition* (a metric crossing its threshold
+or recovering), sends a push to the user's registered `fcm` devices. Tokens FCM
+reports as dead are pruned automatically. Messages carry
+`data: { hostId, type: "alert" | "recovery", metric }` for client routing.
 
 | Method | Path | Body | Notes |
 |--------|------|------|-------|
@@ -162,10 +171,23 @@ done
 | `POST`   | `/v1/devices` | `{ platform, token, label? }` | `platform` ∈ `apns`/`fcm`/`webpush`; idempotent. |
 | `DELETE` | `/v1/devices/:id` | — | Unregister. |
 
-Tokens are stored so the apps can register today. Delivery is **not implemented
-yet**: see [`src/push/`](src/push/index.ts) — the `Notifier` interface, the
-`NoopNotifier`, and the `dispatchAlerts` hook the ingest path already calls.
-Adding APNs/FCM/Web Push and user alert rules is then confined to that module.
+**Enable it:** create a Firebase project, download a *service-account* key
+(Project settings → Service accounts → Generate new private key), and store the
+whole JSON as a secret:
+
+```bash
+wrangler secret put FCM_SERVICE_ACCOUNT   # paste the service-account JSON
+```
+
+Without that secret, push is disabled (alerts are simply not sent). The auth is
+the Firebase service account: the worker signs a short-lived RS256 JWT with the
+account key (Web Crypto), exchanges it for an OAuth2 token (cached), and calls
+the FCM HTTP v1 API — no Firebase Admin SDK.
+
+**Client side (to wire in):** the apps obtain an FCM registration token via the
+Firebase SDK and `POST /v1/devices { platform: "fcm", token }`; a tap routes on
+`data.hostId`. That client integration needs a Firebase project config and is
+the remaining step.
 
 ## License
 

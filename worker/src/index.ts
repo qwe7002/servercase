@@ -5,7 +5,7 @@
  *   • Config sync: pull/push the secret-free SyncPayload across devices.
  *   • Probe ingest: receive servercase.probe.v1 snapshots over per-host tokens.
  *   • Live stream: push those snapshots to a user's clients over a WebSocket.
- *   • Push scaffolding: device registration + a delivery seam (not sending yet).
+ *   • Push: threshold alerts delivered to a user's devices over FCM.
  *
  * SSH credentials and the Bitwarden vault never reach here — secrets stay in
  * the ServerCase app (see the project README).

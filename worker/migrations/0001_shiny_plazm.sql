@@ -1,0 +1,1 @@
+ALTER TABLE `probe_hosts` ADD `alert_state` text;

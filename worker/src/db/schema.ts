@@ -51,6 +51,8 @@ export const probeHosts = sqliteTable(
     lastSeenAt: integer('last_seen_at'),
     // Most recent servercase.probe.v1 JSON, for fast reads by the clients.
     latestSnapshot: text('latest_snapshot'),
+    // JSON array of currently-breaching alert keys, for push transition detection.
+    alertState: text('alert_state'),
   },
   (t) => [
     index('idx_probe_hosts_user').on(t.userId),

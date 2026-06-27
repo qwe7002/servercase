@@ -12,6 +12,16 @@ export interface Env {
   ALLOW_REGISTRATION?: string;
   /** Max history rows kept per probe host. Defaults to 240. "0" keeps latest only. */
   PROBE_HISTORY_LIMIT?: string;
+  /**
+   * Firebase service-account JSON (the whole downloaded file, as a string) used
+   * to send FCM push. Set via `wrangler secret put FCM_SERVICE_ACCOUNT`. When
+   * absent, push delivery is disabled (alerts are simply not sent).
+   */
+  FCM_SERVICE_ACCOUNT?: string;
+  /** Alert thresholds, percent. Defaults: CPU 90, memory 90, disk 90. */
+  ALERT_CPU_PCT?: string;
+  ALERT_MEM_PCT?: string;
+  ALERT_DISK_PCT?: string;
 }
 
 export function registrationAllowed(env: Env): boolean {
