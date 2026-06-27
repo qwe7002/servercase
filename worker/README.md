@@ -70,6 +70,8 @@ Config (`wrangler.toml [vars]`):
 
 All bodies are JSON. Authenticated client routes take
 `Authorization: Bearer <session token>`; ingest takes the per-host probe token.
+CORS is wildcard-open (bearer tokens only, never cookies), so the desktop
+renderer and a browser panel can call the API directly.
 
 ### Accounts
 

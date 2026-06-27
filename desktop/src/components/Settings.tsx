@@ -20,9 +20,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import {
   Bot,
+  Cloud,
+  CloudDownload,
+  CloudUpload,
   Copy,
   KeyRound,
   Lock,
+  LogOut,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -30,8 +34,10 @@ import {
   Trash2,
   Unlock,
 } from 'lucide-react';
+import { useCloud, hasValidSession } from '../store/cloud';
+import { cloudAuth, cloudPull, cloudPush, CloudError } from '../lib/cloud';
 
-type Section = 'bitwarden' | 'snippets' | 'sync' | 'bridge';
+type Section = 'bitwarden' | 'snippets' | 'sync' | 'cloud' | 'bridge';
 
 interface Props {
   onDone: () => void;
@@ -50,10 +56,11 @@ export function Settings({ onDone }: Props) {
         </DialogHeader>
 
         <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="bitwarden">Keychain</TabsTrigger>
             <TabsTrigger value="snippets">Snippets</TabsTrigger>
             <TabsTrigger value="sync">Auto-sync</TabsTrigger>
+            <TabsTrigger value="cloud">Cloud</TabsTrigger>
             <TabsTrigger value="bridge">AI</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -62,6 +69,7 @@ export function Settings({ onDone }: Props) {
           {section === 'bitwarden' && <BitwardenSection />}
           {section === 'snippets' && <SnippetsSection />}
           {section === 'sync' && <SyncSection />}
+          {section === 'cloud' && <CloudSection />}
           {section === 'bridge' && <BridgeSection />}
         </div>
       </DialogContent>
@@ -546,6 +554,193 @@ function SyncSection() {
       </div>
 
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
+
+// ── Cloud (worker sync) ─────────────────────────────────────────────────────
+
+function CloudSection() {
+  const cloud = useSettings((s) => s.settings.cloud);
+  const setCloud = useSettings((s) => s.setCloud);
+  const sessionState = useCloud();
+  const signedIn = hasValidSession(sessionState);
+
+  const [email, setEmail] = useState(cloud.email);
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async (fn: () => Promise<string>) => {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      setMsg(await fn());
+    } catch (e) {
+      const ce = e as CloudError;
+      // A stale-base push is the one conflict worth a tailored hint.
+      setErr(
+        ce.status === 409
+          ? 'The cloud copy changed since your last sync. Pull first, then push.'
+          : (e as Error).message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const authenticate = (mode: 'login' | 'register') =>
+    run(async () => {
+      const user = await cloudAuth(mode, email.trim(), password);
+      setPassword('');
+      return mode === 'register'
+        ? `Account created — signed in as ${user.email}.`
+        : `Signed in as ${user.email}.`;
+    });
+
+  const push = () =>
+    run(async () => `Pushed config to the cloud (revision ${await cloudPush()}).`);
+  const pull = () =>
+    run(async () => {
+      await cloudPull();
+      return 'Config restored from the cloud.';
+    });
+
+  const signOut = () => {
+    sessionState.clear();
+    setMsg(null);
+    setErr(null);
+  };
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <Label className="flex items-center gap-2">
+            <Cloud className="size-4" /> ServerCase Cloud
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Sync your server list and settings to a ServerCase Worker and read
+            live probe status across devices. Secrets are never uploaded — they
+            sync through Bitwarden — and your session token stays on this device.
+          </p>
+        </div>
+        <Switch
+          checked={cloud.enabled}
+          onCheckedChange={(v) => setCloud({ enabled: v })}
+        />
+      </div>
+
+      {cloud.enabled && (
+        <>
+          <Separator />
+
+          <div className="grid gap-2">
+            <Label htmlFor="cloud-url">Worker URL</Label>
+            <Input
+              id="cloud-url"
+              placeholder="https://worker.example.com"
+              value={cloud.url}
+              onChange={(e) => setCloud({ url: e.target.value })}
+              className="font-mono text-xs"
+            />
+          </div>
+
+          <Separator />
+
+          {!signedIn ? (
+            <div className="grid gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="cloud-email">Email</Label>
+                  <Input
+                    id="cloud-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="cloud-password">Password</Label>
+                  <Input
+                    id="cloud-password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void authenticate('login')}
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => void authenticate('login')}
+                  disabled={busy || !cloud.url || !email.trim() || !password}
+                >
+                  Sign in
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => void authenticate('register')}
+                  disabled={busy || !cloud.url || !email.trim() || password.length < 8}
+                >
+                  Create account
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                New accounts need a password of at least 8 characters.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Account</span>
+                <Badge>{sessionState.user?.email}</Badge>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={push} disabled={busy}>
+                  <CloudUpload /> Push to cloud
+                </Button>
+                <Button variant="outline" onClick={pull} disabled={busy}>
+                  <CloudDownload /> Pull from cloud
+                </Button>
+                <Button variant="outline" onClick={signOut} disabled={busy}>
+                  <LogOut /> Sign out
+                </Button>
+              </div>
+
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <Label className="flex items-center gap-2">
+                    <RefreshCw className="size-4" /> Auto-push on changes
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    Push the config to the cloud automatically a few seconds
+                    after you change a server or setting.
+                  </p>
+                </div>
+                <Switch
+                  checked={cloud.autoPush}
+                  onCheckedChange={(v) => setCloud({ autoPush: v })}
+                />
+              </div>
+
+              {sessionState.syncedAt && (
+                <p className="text-xs text-muted-foreground">
+                  Last synced {new Date(sessionState.syncedAt).toLocaleString()} ·
+                  revision {sessionState.syncVersion}
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+      {err && <p className="text-sm text-destructive">{err}</p>}
     </div>
   );
 }

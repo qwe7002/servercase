@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useSettings } from './store/settings';
 import { useServers } from './store/servers';
 import { runExport } from './lib/sync';
+import { cloudPush } from './lib/cloud';
 
 /**
  * Applies the global settings to the main process: keeps the Bitwarden vault
@@ -11,6 +12,7 @@ import { runExport } from './lib/sync';
 export function useGlobalSettings(): void {
   const bitwarden = useSettings((s) => s.settings.bitwarden);
   const autoSync = useSettings((s) => s.settings.autoSync);
+  const cloud = useSettings((s) => s.settings.cloud);
   const loadSecretsFromVault = useServers((s) => s.loadSecretsFromVault);
 
   // Mirror the current Bitwarden settings into the main-process vault.
@@ -43,4 +45,25 @@ export function useGlobalSettings(): void {
     }, ms);
     return () => clearInterval(timer);
   }, [autoSync.enabled, autoSync.filePath, autoSync.intervalMinutes]);
+
+  // Auto-push the config to the cloud (debounced) when servers/settings change.
+  useEffect(() => {
+    if (!cloud.enabled || !cloud.autoPush) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void cloudPush().catch(() => undefined), 3000);
+    };
+    const unsubServers = useServers.subscribe((state, prev) => {
+      if (state.servers !== prev.servers) schedule();
+    });
+    const unsubSettings = useSettings.subscribe((state, prev) => {
+      if (state.settings !== prev.settings) schedule();
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubServers();
+      unsubSettings();
+    };
+  }, [cloud.enabled, cloud.autoPush]);
 }

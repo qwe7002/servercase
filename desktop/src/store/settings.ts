@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type {
   AutoSyncSettings,
   BitwardenSettings,
+  CloudSettings,
   GlobalSettings,
   Snippet,
 } from '../../electron/shared';
@@ -30,6 +31,12 @@ const DEFAULTS: GlobalSettings = {
     enabled: false,
     port: 8765,
   },
+  cloud: {
+    enabled: false,
+    url: '',
+    email: '',
+    autoPush: false,
+  },
   groups: [],
 };
 
@@ -39,6 +46,7 @@ interface SettingsState {
   setBitwarden: (patch: Partial<BitwardenSettings>) => void;
   setAutoSync: (patch: Partial<AutoSyncSettings>) => void;
   setBridge: (patch: Partial<GlobalSettings['bridge']>) => void;
+  setCloud: (patch: Partial<CloudSettings>) => void;
 
   addSnippet: (s: Omit<Snippet, 'id'>) => void;
   updateSnippet: (s: Snippet) => void;
@@ -76,6 +84,13 @@ export const useSettings = create<SettingsState>()(
           settings: {
             ...s.settings,
             bridge: { ...s.settings.bridge, ...patch },
+          },
+        })),
+      setCloud: (patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            cloud: { ...s.settings.cloud, ...patch },
           },
         })),
 

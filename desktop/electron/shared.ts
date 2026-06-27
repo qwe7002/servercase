@@ -123,6 +123,23 @@ export interface BridgeSettings {
   port: number;
 }
 
+/**
+ * Optional connection to a ServerCase Worker for cloud config sync and live
+ * probe status. The session token is intentionally NOT stored here — it lives
+ * in a local-only store and is never written to the sync file. Only the
+ * non-secret URL/email/preferences live in settings, so they sync across
+ * devices.
+ */
+export interface CloudSettings {
+  enabled: boolean;
+  /** Base URL of the worker, e.g. https://worker.example.com */
+  url: string;
+  /** Account email — display and login convenience (not a secret). */
+  email: string;
+  /** Push the config to the cloud automatically after local changes. */
+  autoPush: boolean;
+}
+
 /** A named group/folder used to organize the server list. */
 export interface Group {
   id: string;
@@ -134,6 +151,7 @@ export interface GlobalSettings {
   snippets: Snippet[];
   autoSync: AutoSyncSettings;
   bridge: BridgeSettings;
+  cloud: CloudSettings;
   groups: Group[];
 }
 

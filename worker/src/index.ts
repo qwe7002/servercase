@@ -11,6 +11,7 @@
  */
 import type { Env } from './env.ts';
 import { json } from './http.ts';
+import { preflight, withCors } from './cors.ts';
 import { Router } from './router.ts';
 import { login, me, register } from './routes/auth.ts';
 import { getSync, putSync } from './routes/sync.ts';
@@ -50,10 +51,11 @@ router.delete('/v1/devices/:id', deleteDevice);
 
 export default {
   async fetch(req: Request, env: Env, exec: ExecutionContext): Promise<Response> {
+    if (req.method === 'OPTIONS') return preflight();
     if (!env.SESSION_SECRET) {
       // Fail loud rather than signing sessions with an empty secret.
-      return json({ error: 'worker misconfigured: SESSION_SECRET is not set' }, 500);
+      return withCors(json({ error: 'worker misconfigured: SESSION_SECRET is not set' }, 500));
     }
-    return router.handle(req, env, exec);
+    return withCors(await router.handle(req, env, exec));
   },
 } satisfies ExportedHandler<Env>;
