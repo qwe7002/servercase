@@ -567,9 +567,13 @@ private struct FileTreeNode: View {
                 .foregroundStyle(.primary)
                 .padding(.leading, CGFloat(depth * 14 + 6))
                 .padding(.trailing, 8)
-                .padding(.vertical, 4)
+                .padding(.vertical, 5)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(currentPath == nodePath ? Palette.accent.opacity(0.18) : Color.clear)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(currentPath == nodePath ? Palette.accent.opacity(0.18) : Color.clear)
+                )
+                .padding(.horizontal, 6)
             }
             .buttonStyle(.plain)
 
