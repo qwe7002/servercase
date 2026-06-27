@@ -310,7 +310,7 @@ private struct CloudSettingsPage: View {
                         }
                     }
                 } else {
-                    Section("Sign in") {
+                    Section {
                         TextField("Email", text: $email)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                             .keyboardType(.emailAddress)
@@ -319,6 +319,8 @@ private struct CloudSettingsPage: View {
                             .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.isEmpty)
                         Button("Create account") { authenticate(register: true) }
                             .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.count < 8)
+                    } header: {
+                        Text("Sign in")
                     } footer: {
                         Text("New accounts need a password of at least 8 characters.")
                     }

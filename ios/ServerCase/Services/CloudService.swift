@@ -1,103 +1,208 @@
 import Foundation
+import UIKit
+import UserNotifications
 
-/// An error from the worker API, carrying the HTTP status for the UI.
-struct CloudError: LocalizedError {
-    let status: Int
-    let message: String
+struct CloudUser: Codable, Equatable {
+    var id: String?
+    var email: String
+}
+
+struct CloudSession: Codable, Equatable {
+    var token: String
+    var expiresAt: Date
+    var user: CloudUser
+    var syncVersion: Int?
+    var syncedAt: Date?
+
+    var isValid: Bool {
+        expiresAt > Date()
+    }
+}
+
+struct CloudAuthResult: Codable {
+    var token: String
+    var expiresAt: Date
+    var user: CloudUser
+}
+
+struct CloudSyncResult: Codable {
+    var version: Int
+    var updatedAt: Date
+    var payload: SyncPayload
+}
+
+struct CloudError: LocalizedError, Codable {
+    var status: Int
+    var message: String
+
     var errorDescription: String? { message }
 }
 
-/// Minimal REST client for the ServerCase Worker: account auth and config sync.
-/// The payload's `exportedAt` is encoded as a number (seconds since 1970) to
-/// satisfy the worker's shape check, matching the other clients.
-struct CloudService {
-    private let session = URLSession(configuration: .ephemeral)
+enum CloudSessionStore {
+    private static let key = "servercase.cloud.session"
 
-    struct AuthResult {
-        let user: CloudUser
-        let token: String
-        let expiresAt: Date
+    static func load() -> CloudSession? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? CloudService.decoder.decode(CloudSession.self, from: data)
     }
 
-    func register(url: String, email: String, password: String) async throws -> AuthResult {
-        try await authenticate(url: url, path: "/v1/auth/register", email: email, password: password)
-    }
-
-    func login(url: String, email: String, password: String) async throws -> AuthResult {
-        try await authenticate(url: url, path: "/v1/auth/login", email: email, password: password)
-    }
-
-    func getSync(url: String, token: String) async throws -> (version: Int, updatedAt: Date, payload: SyncPayload) {
-        let data = try await request(base: url, path: "/v1/sync", method: "GET", body: nil, token: token)
-        let res = try Self.decoder.decode(SyncResponse.self, from: data)
-        return (res.version, Date(timeIntervalSince1970: res.updatedAt / 1000), res.payload)
-    }
-
-    func putSync(url: String, token: String, payload: SyncPayload, baseVersion: Int?) async throws -> (version: Int, updatedAt: Date) {
-        let body = try Self.encoder.encode(PutSyncBody(payload: payload, baseVersion: baseVersion))
-        let data = try await request(base: url, path: "/v1/sync", method: "PUT", body: body, token: token)
-        let res = try Self.decoder.decode(PutResult.self, from: data)
-        return (res.version, Date(timeIntervalSince1970: res.updatedAt / 1000))
-    }
-
-    /// Registers an FCM token so the worker can push alerts to this device.
-    func registerDevice(url: String, sessionToken: String, fcmToken: String) async throws {
-        let body = try Self.encoder.encode(RegisterDeviceBody(platform: "fcm", token: fcmToken))
-        _ = try await request(base: url, path: "/v1/devices", method: "POST", body: body, token: sessionToken)
-    }
-
-    // MARK: - Internals
-
-    private func authenticate(url: String, path: String, email: String, password: String) async throws -> AuthResult {
-        let body = try Self.encoder.encode(Credentials(email: email, password: password))
-        let data = try await request(base: url, path: path, method: "POST", body: body, token: nil)
-        let res = try Self.decoder.decode(AuthResponse.self, from: data)
-        return AuthResult(user: res.user, token: res.token,
-                          expiresAt: Date(timeIntervalSince1970: res.expiresAt / 1000))
-    }
-
-    private func request(base: String, path: String, method: String, body: Data?, token: String?) async throws -> Data {
-        let trimmed = base.hasSuffix("/") ? String(base.dropLast()) : base
-        guard !trimmed.isEmpty, let u = URL(string: trimmed + path) else {
-            throw CloudError(status: 0, message: "Set a valid worker URL first")
+    static func save(_ session: CloudSession?) {
+        guard let session else {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
         }
-        var req = URLRequest(url: u)
-        req.httpMethod = method
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token { req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        req.httpBody = body
-
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: req)
-        } catch {
-            throw CloudError(status: 0, message: "Cannot reach \(trimmed): \(error.localizedDescription)")
+        if let data = try? CloudService.encoder.encode(session) {
+            UserDefaults.standard.set(data, forKey: key)
         }
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else {
-            let message = (try? Self.decoder.decode(ErrorResponse.self, from: data))?.error ?? "HTTP \(code)"
-            throw CloudError(status: code, message: message)
-        }
-        return data
     }
-
-    private struct Credentials: Codable { let email: String; let password: String }
-    private struct RegisterDeviceBody: Codable { let platform: String; let token: String }
-    private struct PutSyncBody: Codable { let payload: SyncPayload; let baseVersion: Int? }
-    private struct AuthResponse: Codable { let user: CloudUser; let token: String; let expiresAt: Double }
-    private struct SyncResponse: Codable { let version: Int; let updatedAt: Double; let payload: SyncPayload }
-    private struct PutResult: Codable { let version: Int; let updatedAt: Double }
-    private struct ErrorResponse: Codable { let error: String? }
-
-    private static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .secondsSince1970
-        return e
-    }()
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .secondsSince1970
-        return d
-    }()
 }
+
+enum PushToken {
+    private static let key = "servercase.push.fcmToken"
+
+    static var current: String? {
+        get { UserDefaults.standard.string(forKey: key) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: key)
+            NotificationCenter.default.post(name: .fcmTokenReceived, object: nil)
+        }
+    }
+}
+
+extension Notification.Name {
+    static let fcmTokenReceived = Notification.Name("servercase.fcmTokenReceived")
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let granted = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
+            if granted == true {
+                application.registerForRemoteNotifications()
+            }
+        }
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        PushToken.current = deviceToken.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+struct CloudService {
+    static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+
+    static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func register(url: String, email: String, password: String) async throws -> CloudAuthResult {
+        try await send(path: "/auth/register", baseURL: url, method: "POST", body: AuthRequest(email: email, password: password))
+    }
+
+    func login(url: String, email: String, password: String) async throws -> CloudAuthResult {
+        try await send(path: "/auth/login", baseURL: url, method: "POST", body: AuthRequest(email: email, password: password))
+    }
+
+    func registerDevice(url: String, sessionToken: String, fcmToken: String) async throws {
+        let _: EmptyResponse = try await send(
+            path: "/devices",
+            baseURL: url,
+            method: "POST",
+            token: sessionToken,
+            body: DeviceRequest(fcmToken: fcmToken)
+        )
+    }
+
+    func putSync(url: String, token: String, payload: SyncPayload, baseVersion: Int?) async throws -> CloudSyncResult {
+        try await send(
+            path: "/sync",
+            baseURL: url,
+            method: "PUT",
+            token: token,
+            body: PutSyncRequest(baseVersion: baseVersion, payload: payload)
+        )
+    }
+
+    func getSync(url: String, token: String) async throws -> CloudSyncResult {
+        try await send(path: "/sync", baseURL: url, method: "GET", token: token, body: Optional<EmptyRequest>.none)
+    }
+
+    private func send<RequestBody: Encodable, ResponseBody: Decodable>(
+        path: String,
+        baseURL: String,
+        method: String,
+        token: String? = nil,
+        body: RequestBody?
+    ) async throws -> ResponseBody {
+        guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw CloudError(status: 0, message: "Invalid cloud URL")
+        }
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpointPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = "/" + [basePath, endpointPath].filter { !$0.isEmpty }.joined(separator: "/")
+        guard let url = components.url else {
+            throw CloudError(status: 0, message: "Invalid cloud URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try Self.encoder.encode(body)
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CloudError(status: 0, message: "Invalid cloud response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if let cloudError = try? Self.decoder.decode(CloudError.self, from: data) {
+                throw cloudError
+            }
+            throw CloudError(status: http.statusCode, message: HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
+        }
+        if ResponseBody.self == EmptyResponse.self {
+            return EmptyResponse() as! ResponseBody
+        }
+        return try Self.decoder.decode(ResponseBody.self, from: data)
+    }
+}
+
+private struct AuthRequest: Encodable {
+    var email: String
+    var password: String
+}
+
+private struct DeviceRequest: Encodable {
+    var fcmToken: String
+}
+
+private struct PutSyncRequest: Encodable {
+    var baseVersion: Int?
+    var payload: SyncPayload
+}
+
+private struct EmptyRequest: Encodable {}
+private struct EmptyResponse: Decodable {}
