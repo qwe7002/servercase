@@ -14,12 +14,13 @@ struct TerminalView: View {
     @StateObject private var bridge = TerminalBridge()
 
     var body: some View {
+        let terminal = model.settings.terminal
         ZStack(alignment: .topTrailing) {
             if let service = model.service(server.id) {
-                SwiftTermTerminalView(service: service, bridge: bridge)
+                SwiftTermTerminalView(service: service, bridge: bridge, settings: terminal)
                     .padding(.horizontal, terminalHorizontalInset)
                     .padding(.vertical, terminalVerticalInset)
-                    .background(Color(red: 0.04, green: 0.05, blue: 0.07))
+                    .background(Color(uiColor: UIColor(hex: terminal.colorScheme.backgroundHex)))
                     .ignoresSafeArea(.keyboard, edges: .bottom)
             } else {
                 ContentUnavailableView(
@@ -116,6 +117,7 @@ private final class HardwareKeyboardMonitor {
 private struct SwiftTermTerminalView: UIViewRepresentable {
     let service: SSHService
     let bridge: TerminalBridge
+    let settings: TerminalSettings
 
     func makeCoordinator() -> Coordinator {
         Coordinator(service: service, bridge: bridge)
@@ -124,11 +126,10 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
     func makeUIView(context: Context) -> SwiftTerm.TerminalView {
         let terminal = SwiftTerm.TerminalView(
             frame: .zero,
-            font: .monospacedSystemFont(ofSize: 13, weight: .regular)
+            font: .monospacedSystemFont(ofSize: CGFloat(settings.fontSize), weight: .regular)
         )
         terminal.terminalDelegate = context.coordinator
-        terminal.nativeBackgroundColor = UIColor(red: 0.04, green: 0.05, blue: 0.07, alpha: 1)
-        terminal.nativeForegroundColor = UIColor(red: 0.84, green: 0.86, blue: 0.9, alpha: 1)
+        applyAppearance(to: terminal)
         terminal.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         context.coordinator.attach(terminal)
         context.coordinator.startKeyboardMonitor(for: terminal)
@@ -143,7 +144,15 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
 
     func updateUIView(_ uiView: SwiftTerm.TerminalView, context: Context) {
         context.coordinator.update(service: service, terminal: uiView)
+        applyAppearance(to: uiView)
         bridge.attach(context.coordinator)
+    }
+
+    /// Applies the font size and color scheme (live on settings changes).
+    private func applyAppearance(to terminal: SwiftTerm.TerminalView) {
+        terminal.font = .monospacedSystemFont(ofSize: CGFloat(settings.fontSize), weight: .regular)
+        terminal.nativeBackgroundColor = UIColor(hex: settings.colorScheme.backgroundHex)
+        terminal.nativeForegroundColor = UIColor(hex: settings.colorScheme.foregroundHex)
     }
 
     static func dismantleUIView(_ uiView: SwiftTerm.TerminalView, coordinator: Coordinator) {
@@ -311,5 +320,19 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
             UIPasteboard.general.string = String(data: content, encoding: .utf8)
         }
+    }
+}
+
+private extension UIColor {
+    /// Builds a color from a 6-digit RGB hex string (e.g. "0b0d12").
+    convenience init(hex: String) {
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self.init(
+            red: CGFloat((value >> 16) & 0xff) / 255,
+            green: CGFloat((value >> 8) & 0xff) / 255,
+            blue: CGFloat(value & 0xff) / 255,
+            alpha: 1
+        )
     }
 }

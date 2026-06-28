@@ -46,11 +46,51 @@ struct BitwardenSettings: Codable, Equatable {
     var itemPrefix: String = "ServerCase/"
 }
 
+enum TerminalCursorStyle: String, Codable, CaseIterable, Identifiable {
+    case block, underline, bar
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
+enum TerminalColorScheme: String, Codable, CaseIterable, Identifiable {
+    case charcoal, black, light, solarized
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+
+    /// Background/foreground hex, shared with the desktop and Android clients.
+    var backgroundHex: String {
+        switch self {
+        case .charcoal: return "0b0d12"
+        case .black: return "000000"
+        case .light: return "f5f5f5"
+        case .solarized: return "002b36"
+        }
+    }
+    var foregroundHex: String {
+        switch self {
+        case .charcoal: return "d6dbe5"
+        case .black: return "e5e5e5"
+        case .light: return "1c1c1c"
+        case .solarized: return "93a1a1"
+        }
+    }
+}
+
+/// Appearance/behaviour of the SSH terminal, shared across servers and synced.
+struct TerminalSettings: Codable, Equatable {
+    var fontSize: Int = 13
+    var cursorBlink: Bool = true
+    var cursorStyle: TerminalCursorStyle = .block
+    var scrollback: Int = 1000
+    var colorScheme: TerminalColorScheme = .charcoal
+}
+
 /// All global, cross-server settings.
 struct GlobalSettings: Codable, Equatable {
     var bitwarden = BitwardenSettings()
     var snippets: [Snippet] = []
     var cloud = CloudSettings()
+    var terminal = TerminalSettings()
     var groups: [ServerGroup] = []
 }
 

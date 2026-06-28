@@ -34,6 +34,12 @@ struct SettingsView: View {
                     } label: {
                         settingsRow("Cloud", systemImage: "icloud", detail: cloudDetail)
                     }
+
+                    NavigationLink {
+                        TerminalSettingsPage(draft: $draft)
+                    } label: {
+                        settingsRow("Terminal", systemImage: "terminal", detail: "\(draft.terminal.fontSize)pt")
+                    }
                 }
 
                 if let message {
@@ -384,6 +390,38 @@ private struct CloudSettingsPage: View {
             return "The cloud copy changed since your last sync. Pull first, then push."
         }
         return error.localizedDescription
+    }
+}
+
+private struct TerminalSettingsPage: View {
+    @Binding var draft: GlobalSettings
+
+    var body: some View {
+        Form {
+            Section("Text") {
+                Stepper("Font size: \(draft.terminal.fontSize) pt",
+                        value: $draft.terminal.fontSize, in: 8...32)
+                Stepper("Scrollback: \(draft.terminal.scrollback) lines",
+                        value: $draft.terminal.scrollback, in: 100...100_000, step: 100)
+            }
+
+            Section("Cursor") {
+                Picker("Style", selection: $draft.terminal.cursorStyle) {
+                    ForEach(TerminalCursorStyle.allCases) { Text($0.label).tag($0) }
+                }
+                Toggle("Blink", isOn: $draft.terminal.cursorBlink)
+            }
+
+            Section {
+                Picker("Color scheme", selection: $draft.terminal.colorScheme) {
+                    ForEach(TerminalColorScheme.allCases) { Text($0.label).tag($0) }
+                }
+            } footer: {
+                Text("Applies to the SSH terminal on every server, and syncs across your devices through Cloud.")
+            }
+        }
+        .navigationTitle("Terminal")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
