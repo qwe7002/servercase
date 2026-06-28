@@ -19,6 +19,8 @@ Jetpack Compose, Material 3 and SSHJ.
     latter via BouncyCastle). When off, secrets stay on-device and are never
     written to the sync file.
   - **Snippets** — reusable terminal commands.
+  - **Terminal** — font size, scrollback and color scheme for the SSH terminal
+    (synced across devices via Cloud).
   - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
     secret-free config across devices (optionally auto-pushing on change). The
     session token stays on-device and is never written to the synced payload.

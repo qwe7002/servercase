@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -38,18 +39,30 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.servercase.app.data.Snippet
+import com.servercase.app.data.TerminalSettings
 import com.servercase.app.data.ssh.SshClient
 import kotlinx.coroutines.flow.Flow
+
+/** Parses a 6-digit RGB hex string (e.g. "0b0d12") into a Compose Color. */
+private fun colorFromHex(hex: String): Color = Color(android.graphics.Color.parseColor("#$hex"))
 
 private val ANSI = Regex("\\[[0-9;?]*[ -/]*[@-~]")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TerminalScreen(client: SshClient?, snippets: List<Snippet> = emptyList(), onBack: () -> Unit) {
+fun TerminalScreen(
+    client: SshClient?,
+    snippets: List<Snippet> = emptyList(),
+    terminal: TerminalSettings = TerminalSettings(),
+    onBack: () -> Unit,
+) {
     var output by remember { mutableStateOf("") }
     var input by remember { mutableStateOf("") }
     var snippetMenu by remember { mutableStateOf(false) }
     val scroll = rememberScrollState()
+    val maxChars = (terminal.scrollback * 200).coerceAtLeast(4_000)
+    val background = colorFromHex(terminal.colorScheme.backgroundHex)
+    val foreground = colorFromHex(terminal.colorScheme.foregroundHex)
 
     var handle by remember { mutableStateOf<SshClient.ShellHandle?>(null) }
     var flow by remember { mutableStateOf<Flow<String>?>(null) }
@@ -65,8 +78,8 @@ fun TerminalScreen(client: SshClient?, snippets: List<Snippet> = emptyList(), on
 
     LaunchedEffect(flow) {
         flow?.collect { chunk ->
-            // Keep the last ~40k chars; strip ANSI control sequences for display.
-            output = (output + chunk.replace(ANSI, "")).takeLast(40_000)
+            // Keep roughly `scrollback` lines; strip ANSI control sequences.
+            output = (output + chunk.replace(ANSI, "")).takeLast(maxChars)
         }
     }
 
@@ -105,10 +118,15 @@ fun TerminalScreen(client: SshClient?, snippets: List<Snippet> = emptyList(), on
         Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
             Text(
                 text = output,
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(12.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(background)
+                    .verticalScroll(scroll)
+                    .padding(12.dp),
                 fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                color = Color(0xFFD6DBE5),
+                fontSize = terminal.fontSize.sp,
+                color = foreground,
             )
             Row(
                 Modifier.fillMaxWidth().padding(8.dp),

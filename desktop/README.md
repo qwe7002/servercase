@@ -22,6 +22,8 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
     are never written to the sync file.
   - **Snippets** — reusable shell commands, runnable in any terminal from the
     snippet menu.
+  - **Terminal** — font size, cursor style/blink, scrollback and color scheme
+    for the SSH terminal (synced across devices via Cloud).
   - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
     secret-free config across devices (optionally auto-pushing on change), plus
     a live probe-host manager. The session token stays on the device; it is

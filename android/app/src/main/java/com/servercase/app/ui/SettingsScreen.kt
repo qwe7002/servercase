@@ -21,6 +21,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,6 +46,7 @@ import com.servercase.app.data.BitwardenSettings
 import com.servercase.app.data.GlobalSettings
 import com.servercase.app.data.ServerGroup
 import com.servercase.app.data.Snippet
+import com.servercase.app.data.TerminalColorScheme
 import com.servercase.app.data.bitwarden.BitwardenLockState
 import com.servercase.app.vm.UiState
 import java.text.DateFormat
@@ -89,6 +93,7 @@ fun SettingsScreen(
             GroupsSection(settings, onUpdateSettings)
             SnippetsSection(settings, onUpdateSettings)
             CloudSection(state, onUpdateSettings, onCloudAuthenticate, onCloudPush, onCloudPull, onCloudSignOut)
+            TerminalSection(settings, onUpdateSettings)
             state.settingsMessage?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
@@ -286,6 +291,51 @@ private fun SnippetDialog(existing: Snippet?, onDismiss: () -> Unit, onSave: (Sn
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun TerminalSection(settings: GlobalSettings, onUpdate: (GlobalSettings) -> Unit) {
+    val t = settings.terminal
+    SectionCard("Terminal") {
+        Text(
+            "Applies to the SSH terminal on every server, and syncs across your devices through Cloud.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        OutlinedTextField(
+            value = t.fontSize.toString(),
+            onValueChange = {
+                val n = it.toIntOrNull() ?: 13
+                onUpdate(settings.copy(terminal = t.copy(fontSize = n.coerceIn(8, 32))))
+            },
+            label = { Text("Font size") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        )
+        OutlinedTextField(
+            value = t.scrollback.toString(),
+            onValueChange = {
+                val n = it.toIntOrNull() ?: 1000
+                onUpdate(settings.copy(terminal = t.copy(scrollback = n.coerceIn(100, 100_000))))
+            },
+            label = { Text("Scrollback (lines)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        )
+        Text("Color scheme", style = MaterialTheme.typography.labelMedium)
+        val schemes = TerminalColorScheme.entries
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            schemes.forEachIndexed { i, scheme ->
+                SegmentedButton(
+                    selected = t.colorScheme == scheme,
+                    onClick = { onUpdate(settings.copy(terminal = t.copy(colorScheme = scheme))) },
+                    shape = SegmentedButtonDefaults.itemShape(i, schemes.size),
+                ) {
+                    Text(scheme.name.lowercase().replaceFirstChar { it.uppercase() })
+                }
+            }
+        }
+    }
 }
 
 @Composable

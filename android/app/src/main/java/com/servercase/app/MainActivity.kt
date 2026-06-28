@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
                         TerminalScreen(
                             client = vm.client(id),
                             snippets = state.settings.snippets,
+                            terminal = state.settings.terminal,
                             onBack = { nav.popBackStack() },
                         )
                     }

@@ -55,10 +55,33 @@ data class ServerGroup(
 )
 
 @Serializable
+enum class TerminalCursorStyle { BLOCK, UNDERLINE, BAR }
+
+/** Background/foreground hex shared with the desktop and iOS clients. */
+@Serializable
+enum class TerminalColorScheme(val backgroundHex: String, val foregroundHex: String) {
+    CHARCOAL("0b0d12", "d6dbe5"),
+    BLACK("000000", "e5e5e5"),
+    LIGHT("f5f5f5", "1c1c1c"),
+    SOLARIZED("002b36", "93a1a1"),
+}
+
+/** Appearance/behaviour of the SSH terminal, shared across servers and synced. */
+@Serializable
+data class TerminalSettings(
+    val fontSize: Int = 13,
+    val cursorBlink: Boolean = true,
+    val cursorStyle: TerminalCursorStyle = TerminalCursorStyle.BLOCK,
+    val scrollback: Int = 1000,
+    val colorScheme: TerminalColorScheme = TerminalColorScheme.CHARCOAL,
+)
+
+@Serializable
 data class GlobalSettings(
     val bitwarden: BitwardenSettings = BitwardenSettings(),
     val snippets: List<Snippet> = emptyList(),
     val cloud: CloudSettings = CloudSettings(),
+    val terminal: TerminalSettings = TerminalSettings(),
     val groups: List<ServerGroup> = emptyList(),
 )
 
