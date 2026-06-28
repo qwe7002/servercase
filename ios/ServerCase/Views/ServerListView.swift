@@ -21,6 +21,7 @@ struct ServerListView: View {
     @State private var showingSettings = false
     @State private var searchText = ""
     @State private var path: [ServerConfig] = []
+    @State private var collapsedGroupIDs: Set<String> = []
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -37,7 +38,7 @@ struct ServerListView: View {
                     List {
                         if showGroups {
                             ForEach(sections) { section in
-                                Section(section.name) {
+                                Section(section.name, isExpanded: expansionBinding(for: section.id)) {
                                     ForEach(section.servers) { server in serverLink(server) }
                                 }
                             }
@@ -93,6 +94,18 @@ struct ServerListView: View {
         .buttonStyle(.plain)
         .serverRowActions(server, model: model, editing: $editing)
     }
+
+    private func expansionBinding(for sectionID: String) -> Binding<Bool> {
+        Binding {
+            !collapsedGroupIDs.contains(sectionID)
+        } set: { isExpanded in
+            if isExpanded {
+                collapsedGroupIDs.remove(sectionID)
+            } else {
+                collapsedGroupIDs.insert(sectionID)
+            }
+        }
+    }
 }
 
 struct ServerSplitView: View {
@@ -103,6 +116,7 @@ struct ServerSplitView: View {
     @State private var showingSettings = false
     @State private var searchText = ""
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var collapsedGroupIDs: Set<String> = []
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -163,7 +177,7 @@ struct ServerSplitView: View {
             List(selection: $selectedServerID) {
                 if showGroups {
                     ForEach(sections) { section in
-                        Section(section.name) {
+                        Section(section.name, isExpanded: expansionBinding(for: section.id)) {
                             ForEach(section.servers) { server in row(server) }
                         }
                     }
@@ -192,6 +206,18 @@ struct ServerSplitView: View {
         ServerRow(server: server)
             .tag(server.id)
             .serverRowActions(server, model: model, editing: $editing)
+    }
+
+    private func expansionBinding(for sectionID: String) -> Binding<Bool> {
+        Binding {
+            !collapsedGroupIDs.contains(sectionID)
+        } set: { isExpanded in
+            if isExpanded {
+                collapsedGroupIDs.remove(sectionID)
+            } else {
+                collapsedGroupIDs.insert(sectionID)
+            }
+        }
     }
 }
 
@@ -252,12 +278,6 @@ private struct ServerRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let groupName {
-                    Label(groupName, systemImage: "folder")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
 
             Spacer()
@@ -267,14 +287,6 @@ private struct ServerRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
-    }
-
-    private var groupName: String? {
-        guard let groupId = server.groupId,
-              let group = model.settings.groups.first(where: { $0.id == groupId }) else {
-            return nil
-        }
-        return group.name
     }
 }
 
