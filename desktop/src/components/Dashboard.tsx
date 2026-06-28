@@ -9,6 +9,7 @@ import { statusFromProbe } from '../lib/probeStatus';
 import { Gauge, UsageBar } from './StatusCard';
 import { TerminalTabs } from './TerminalTabs';
 import { Sftp } from './Sftp';
+import { PortForwards } from './PortForwards';
 import { connectServer } from '../lib/connect';
 import { cloudApi, CloudError } from '../lib/cloud';
 import { buildProbeInstallCommand } from '../lib/probeInstall';
@@ -28,7 +29,7 @@ interface Props {
   server: ServerConfig;
 }
 
-type Tab = 'overview' | 'terminal' | 'files';
+type Tab = 'overview' | 'terminal' | 'files' | 'forwarding';
 
 export function Dashboard({ server }: Props) {
   const connState = useServers((s) => s.connState[server.id]) ?? 'disconnected';
@@ -124,6 +125,7 @@ export function Dashboard({ server }: Props) {
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="terminal">Terminal</TabsTrigger>
               <TabsTrigger value="files">Files</TabsTrigger>
+              <TabsTrigger value="forwarding">Forwarding</TabsTrigger>
             </TabsList>
           </Tabs>
           {!usesProbe && (
@@ -169,6 +171,16 @@ export function Dashboard({ server }: Props) {
       ) : tab === 'files' ? (
         connected ? (
           <Sftp serverId={server.id} />
+        ) : (
+          <Placeholder>
+            {connState === 'connecting'
+              ? 'Establishing SSH connection…'
+              : 'SSH connection is offline. Use Reconnect from the server list menu.'}
+          </Placeholder>
+        )
+      ) : tab === 'forwarding' ? (
+        connected ? (
+          <PortForwards server={server} />
         ) : (
           <Placeholder>
             {connState === 'connecting'

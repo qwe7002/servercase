@@ -15,6 +15,9 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
 - **SFTP file manager** with a FileZilla-style layout: remote directory tree,
   detailed file listing (size / type / modified / permissions), inline text
   editor, upload / download, mkdir / rename / delete, and a transfer log
+- **Port forwarding** panel (Forwarding tab) — open SSH local tunnels
+  (`local host:port → remote host:port`) over the live connection, with a
+  labelled list of active forwards; tunnels close with the connection
 - **Global settings** (gear icon in the sidebar):
   - **Keychain (Bitwarden)** — store usernames, passwords and SSH keys in your
     Bitwarden vault so secrets sync end-to-end across devices. Reached directly
@@ -81,7 +84,7 @@ src/                     React renderer
   useConnections.ts      connection events + 3s status polling
   useGlobalSettings.ts   vault configuration, secret loading, cloud auto-push
   components/            ServerList, ServerForm, Dashboard, StatusCard,
-                         Terminal, Sftp, Settings
+                         Terminal, Sftp, PortForwards, Settings
 ```
 
 Secrets, when the Bitwarden keychain is enabled, are stripped from the
