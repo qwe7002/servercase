@@ -104,6 +104,32 @@ struct ProbeListResult: Codable {
     var hosts: [ProbeHost]
 }
 
+struct ProbeStreamMessage: Codable {
+    var type: String
+    var hostId: String?
+    var at: Date?
+    var snapshot: ProbeSnapshot?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case hostId
+        case at
+        case snapshot
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(String.self, forKey: .type)
+        hostId = try c.decodeIfPresent(String.self, forKey: .hostId)
+        if let ms = try c.decodeIfPresent(Double.self, forKey: .at) {
+            at = Date(timeIntervalSince1970: ms / 1000)
+        } else {
+            at = nil
+        }
+        snapshot = try c.decodeIfPresent(ProbeSnapshot.self, forKey: .snapshot)
+    }
+}
+
 struct ProbeSnapshot: Codable, Equatable {
     var schema: String?
     var collectedAtMs: Double

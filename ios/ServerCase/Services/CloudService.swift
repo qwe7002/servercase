@@ -163,6 +163,24 @@ struct CloudService {
         )
     }
 
+    func probeStreamURL(baseURL: String, token: String) throws -> URL {
+        guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw CloudError(status: 0, message: "Invalid cloud URL")
+        }
+        switch components.scheme {
+        case "https": components.scheme = "wss"
+        case "http": components.scheme = "ws"
+        default: throw CloudError(status: 0, message: "Invalid cloud URL")
+        }
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = "/" + [basePath, "stream"].filter { !$0.isEmpty }.joined(separator: "/")
+        components.queryItems = [URLQueryItem(name: "token", value: token)]
+        guard let url = components.url else {
+            throw CloudError(status: 0, message: "Invalid cloud URL")
+        }
+        return url
+    }
+
     private func send<RequestBody: Encodable, ResponseBody: Decodable>(
         path: String,
         baseURL: String,

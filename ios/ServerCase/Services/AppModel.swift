@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     private var connectionTokens: [UUID: UUID] = [:]
     private var pollTask: Task<Void, Never>?
     private var cloudPushTask: Task<Void, Never>?
+    private var probeStreamTask: URLSessionWebSocketTask?
+    private var probeStreamLoop: Task<Void, Never>?
     /// Set while applying a pulled snapshot, to suppress the auto-push echo.
     private var applyingRemote = false
     /// The FCM token we've already registered, to avoid repeats.
@@ -34,6 +36,7 @@ final class AppModel: ObservableObject {
         NotificationCenter.default.addObserver(forName: .fcmTokenReceived, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.registerPushToken() }
         }
+        startProbeStream()
     }
 
     private var vaultEnabled: Bool { settings.bitwarden.enabled }
@@ -156,12 +159,7 @@ final class AppModel: ObservableObject {
     func startPolling(_ id: UUID) {
         pollTask?.cancel()
         if servers.first(where: { $0.id == id })?.probeHostId != nil {
-            pollTask = Task { [weak self] in
-                while !Task.isCancelled {
-                    await self?.refreshProbes()
-                    try? await Task.sleep(nanoseconds: 10_000_000_000)
-                }
-            }
+            startProbeStream()
             return
         }
         pollTask = Task { [weak self] in
@@ -192,12 +190,16 @@ final class AppModel: ObservableObject {
     // MARK: Settings
 
     func updateSettings(_ new: GlobalSettings) {
+        let oldCloud = settings.cloud
         settings = new
         SettingsStore.save(new)
         let bw = new.bitwarden
         Task { await vault.configure(bw) }
         // Re-persist so secrets are stripped (vault on) or restored (vault off).
         saveServers()
+        if oldCloud != new.cloud {
+            restartProbeStream()
+        }
     }
 
     func setBitwardenEnabled(_ enabled: Bool) {
@@ -261,6 +263,7 @@ final class AppModel: ObservableObject {
         updateSettings(next)
         registerPushToken()
         await refreshProbes()
+        startProbeStream()
     }
 
     /// Registers the current FCM token with the worker once signed in (idempotent).
@@ -302,11 +305,13 @@ final class AppModel: ObservableObject {
         updateSettings(result.payload.settings)
         applyingRemote = false
         updateCloudSyncState(session, version: result.version, at: result.updatedAt)
+        startProbeStream()
     }
 
     func cloudSignOut() {
         cloudSession = nil
         probeHosts = []
+        stopProbeStream()
         CloudSessionStore.save(nil)
     }
 
@@ -328,6 +333,94 @@ final class AppModel: ObservableObject {
             probeHosts = try await cloud.listProbes(url: settings.cloud.url, token: session.token).hosts
         } catch {
             // Best-effort; the settings page surfaces explicit create/delete errors.
+        }
+    }
+
+    func startProbeStream() {
+        guard settings.cloud.enabled, !settings.cloud.url.isEmpty,
+              let session = cloudSession, session.isValid else {
+            stopProbeStream()
+            return
+        }
+        if probeStreamTask != nil { return }
+
+        Task { await refreshProbes() }
+
+        do {
+            let url = try cloud.probeStreamURL(baseURL: settings.cloud.url, token: session.token)
+            let task = URLSession.shared.webSocketTask(with: url)
+            probeStreamTask = task
+            task.resume()
+            probeStreamLoop = Task { [weak self, weak task] in
+                guard let task else { return }
+                await self?.receiveProbeStream(task)
+            }
+        } catch {
+            // The settings page surfaces explicit cloud errors; stream startup is best-effort.
+        }
+    }
+
+    func stopProbeStream() {
+        probeStreamLoop?.cancel()
+        probeStreamLoop = nil
+        probeStreamTask?.cancel(with: .goingAway, reason: nil)
+        probeStreamTask = nil
+    }
+
+    private func restartProbeStream() {
+        stopProbeStream()
+        startProbeStream()
+    }
+
+    private func receiveProbeStream(_ task: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            do {
+                let message = try await task.receive()
+                switch message {
+                case .string(let text):
+                    handleProbeStreamMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        handleProbeStreamMessage(text)
+                    }
+                @unknown default:
+                    break
+                }
+            } catch {
+                if !Task.isCancelled {
+                    probeStreamTask = nil
+                    probeStreamLoop = nil
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    startProbeStream()
+                }
+                return
+            }
+        }
+    }
+
+    private func handleProbeStreamMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let message = try? CloudService.decoder.decode(ProbeStreamMessage.self, from: data),
+              message.type == "snapshot",
+              let hostId = message.hostId,
+              let snapshot = message.snapshot else { return }
+        upsertProbeSnapshot(hostId: hostId, at: message.at, snapshot: snapshot)
+    }
+
+    private func upsertProbeSnapshot(hostId: String, at: Date?, snapshot: ProbeSnapshot) {
+        if let index = probeHosts.firstIndex(where: { $0.id == hostId }) {
+            probeHosts[index].latest = snapshot
+            probeHosts[index].lastSeenAt = at ?? Date()
+        } else {
+            probeHosts.append(
+                ProbeHost(
+                    id: hostId,
+                    name: snapshot.hostname.isEmpty ? hostId : snapshot.hostname,
+                    createdAt: Date(),
+                    lastSeenAt: at ?? Date(),
+                    latest: snapshot
+                )
+            )
         }
     }
 
@@ -360,6 +453,7 @@ final class AppModel: ObservableObject {
             saveServers()
         }
         await refreshProbes()
+        startProbeStream()
         return output
     }
 
@@ -380,7 +474,7 @@ final class AppModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             if Task.isCancelled { return }
             guard let self else { return }
-            try? await self.cloudPushNow()
+            _ = try? await self.cloudPushNow()
         }
     }
 }
