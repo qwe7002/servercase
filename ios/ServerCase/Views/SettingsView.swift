@@ -416,6 +416,17 @@ private struct ProbeHostsPage: View {
                     .autocorrectionDisabled()
                 Button("Create probe") { create() }
                     .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                Picker("Install on", selection: $selectedServerId) {
+                    Text("Choose server").tag(Optional<UUID>.none)
+                    ForEach(model.servers) { server in
+                        Text(server.name).tag(Optional(server.id))
+                    }
+                }
+                Button("Create and install") {
+                    createAndInstall()
+                }
+                .disabled(busy || selectedServerId == nil)
             }
 
             if let newToken {
@@ -497,6 +508,27 @@ private struct ProbeHostsPage: View {
                 let result = try await model.createProbe(name: trimmed)
                 newToken = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
                 name = ""
+            } catch {
+                message = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func createAndInstall() {
+        guard let id = selectedServerId,
+              let server = model.servers.first(where: { $0.id == id }) else { return }
+        busy = true
+        message = nil
+        installLog = ""
+        Task {
+            do {
+                let result = try await model.createProbe(name: server.host.trimmingCharacters(in: .whitespaces))
+                let token = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
+                newToken = token
+                installLog = try await model.installProbe(hostId: token.id, token: token.token, on: server)
+                newToken = nil
+                message = "Probe installed on \(server.name)."
             } catch {
                 message = error.localizedDescription
             }

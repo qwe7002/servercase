@@ -5,7 +5,7 @@
  */
 import { and, desc, eq, gte } from 'drizzle-orm';
 import type { Ctx } from '../router.ts';
-import { json, notFound, readJson, requireString } from '../http.ts';
+import { badRequest, conflict, json, notFound, readJson, requireString } from '../http.ts';
 import { newId, newProbeToken, sha256Hex } from '../ids.ts';
 import { requireUser } from '../auth/session.ts';
 import { getDb } from '../db/client.ts';
@@ -39,11 +39,20 @@ export async function listProbes(ctx: Ctx): Promise<Response> {
 export async function createProbe(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
   const body = await readJson(ctx.req);
-  const name = requireString(body, 'name');
+  const name = requireString(body, 'name').trim();
+  if (!name) throw badRequest('probe host name is required');
+
+  const db = getDb(ctx.env);
+  const existing = await db
+    .select({ id: probeHosts.id })
+    .from(probeHosts)
+    .where(and(eq(probeHosts.userId, user.id), eq(probeHosts.name, name)))
+    .get();
+  if (existing) throw conflict(`probe host "${name}" already exists`);
 
   const id = newId();
   const token = newProbeToken();
-  await getDb(ctx.env).insert(probeHosts).values({
+  await db.insert(probeHosts).values({
     id,
     userId: user.id,
     name,

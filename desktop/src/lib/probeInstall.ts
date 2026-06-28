@@ -5,7 +5,7 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export function buildProbeInstallCommand(apiUrl: string, token: string): string {
+export function buildProbeInstallCommand(apiUrl: string, token: string, hostName: string): string {
   return [
     'set -e',
     'tmp="$(mktemp)"',
@@ -17,7 +17,7 @@ export function buildProbeInstallCommand(apiUrl: string, token: string): string 
     'chmod 700 "$tmp"',
     `bash "$tmp" --user-service --api ${shellQuote(apiUrl)} --token ${shellQuote(
       token,
-    )} --interval 10 --public-ip`,
+    )} --name ${shellQuote(hostName)} --interval 10 --public-ip`,
     'rm -f "$tmp"',
   ].join('; ');
 }

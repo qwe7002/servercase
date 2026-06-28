@@ -447,7 +447,7 @@ final class AppModel: ObservableObject {
 
     func installProbe(hostId: String, token: String, on server: ServerConfig) async throws -> String {
         let service = try await connectedService(for: server)
-        let output = try await service.run(probeInstallCommand(apiURL: settings.cloud.url, token: token))
+        let output = try await service.run(probeInstallCommand(apiURL: settings.cloud.url, token: token, hostName: server.host))
         if let index = servers.firstIndex(where: { $0.id == server.id }) {
             servers[index].probeHostId = hostId
             saveServers()
@@ -485,13 +485,13 @@ private func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
-private func probeInstallCommand(apiURL: String, token: String) -> String {
+private func probeInstallCommand(apiURL: String, token: String, hostName: String) -> String {
     [
         "set -e",
         "tmp=\"$(mktemp)\"",
         "if command -v curl >/dev/null 2>&1; then curl -fsSL \(shellQuote(probeInstallScriptURL)) -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \(shellQuote(probeInstallScriptURL)); else echo \"need curl or wget\"; exit 1; fi",
         "chmod 700 \"$tmp\"",
-        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --interval 10 --public-ip",
+        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip",
         "rm -f \"$tmp\"",
     ].joined(separator: "; ")
 }

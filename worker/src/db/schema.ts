@@ -56,6 +56,7 @@ export const probeHosts = sqliteTable(
   },
   (t) => [
     index('idx_probe_hosts_user').on(t.userId),
+    uniqueIndex('idx_probe_hosts_user_name').on(t.userId, t.name),
     uniqueIndex('idx_probe_hosts_token').on(t.tokenHash),
   ],
 );

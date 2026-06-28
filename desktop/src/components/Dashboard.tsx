@@ -78,7 +78,8 @@ export function Dashboard({ server }: Props) {
     setInstallError(null);
     setInstallMessage(null);
     try {
-      const created = await cloudApi.createProbe(cloudUrl, cloudToken, server.name);
+      const probeName = server.host.trim();
+      const created = await cloudApi.createProbe(cloudUrl, cloudToken, probeName);
       setManualToken({ name: created.host.name, token: created.token });
       const current = useServers.getState().connState[server.id] ?? 'disconnected';
       if (current !== 'connected') {
@@ -86,7 +87,7 @@ export function Dashboard({ server }: Props) {
       }
       const result = await api.runCommand(
         server.id,
-        buildProbeInstallCommand(cloudUrl, created.token),
+        buildProbeInstallCommand(cloudUrl, created.token, probeName),
       );
       const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
       if (result.code && result.code !== 0) {
