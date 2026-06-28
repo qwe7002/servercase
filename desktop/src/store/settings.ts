@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
-  AutoSyncSettings,
   BitwardenSettings,
+  CloudSettings,
   GlobalSettings,
   Snippet,
+  TerminalSettings,
 } from '../../electron/shared';
 
 function uid(): string {
@@ -21,14 +22,22 @@ const DEFAULTS: GlobalSettings = {
     itemPrefix: 'ServerCase/',
   },
   snippets: [],
-  autoSync: {
-    enabled: false,
-    intervalMinutes: 30,
-    filePath: '',
-  },
   bridge: {
     enabled: false,
     port: 8765,
+  },
+  cloud: {
+    enabled: false,
+    url: '',
+    email: '',
+    autoPush: false,
+  },
+  terminal: {
+    fontSize: 13,
+    cursorBlink: true,
+    cursorStyle: 'block',
+    scrollback: 1000,
+    colorScheme: 'charcoal',
   },
   groups: [],
 };
@@ -37,8 +46,9 @@ interface SettingsState {
   settings: GlobalSettings;
 
   setBitwarden: (patch: Partial<BitwardenSettings>) => void;
-  setAutoSync: (patch: Partial<AutoSyncSettings>) => void;
   setBridge: (patch: Partial<GlobalSettings['bridge']>) => void;
+  setCloud: (patch: Partial<CloudSettings>) => void;
+  setTerminal: (patch: Partial<TerminalSettings>) => void;
 
   addSnippet: (s: Omit<Snippet, 'id'>) => void;
   updateSnippet: (s: Snippet) => void;
@@ -64,18 +74,25 @@ export const useSettings = create<SettingsState>()(
             bitwarden: { ...s.settings.bitwarden, ...patch },
           },
         })),
-      setAutoSync: (patch) =>
-        set((s) => ({
-          settings: {
-            ...s.settings,
-            autoSync: { ...s.settings.autoSync, ...patch },
-          },
-        })),
       setBridge: (patch) =>
         set((s) => ({
           settings: {
             ...s.settings,
             bridge: { ...s.settings.bridge, ...patch },
+          },
+        })),
+      setCloud: (patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            cloud: { ...s.settings.cloud, ...patch },
+          },
+        })),
+      setTerminal: (patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            terminal: { ...s.settings.terminal, ...patch },
           },
         })),
 

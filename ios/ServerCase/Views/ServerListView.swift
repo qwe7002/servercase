@@ -21,6 +21,7 @@ struct ServerListView: View {
     @State private var showingSettings = false
     @State private var searchText = ""
     @State private var path: [ServerConfig] = []
+    @State private var collapsedGroupIDs: Set<String> = []
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -37,7 +38,7 @@ struct ServerListView: View {
                     List {
                         if showGroups {
                             ForEach(sections) { section in
-                                Section(section.name) {
+                                Section(section.name, isExpanded: expansionBinding(for: section.id)) {
                                     ForEach(section.servers) { server in serverLink(server) }
                                 }
                             }
@@ -73,7 +74,7 @@ struct ServerListView: View {
     }
 
     private var filtered: [ServerConfig] {
-        ServerListLayout.filtered(model.servers, query: searchText)
+        ServerListLayout.filtered(model.servers, groups: model.settings.groups, query: searchText)
     }
 
     private var showGroups: Bool { !model.settings.groups.isEmpty }
@@ -93,6 +94,18 @@ struct ServerListView: View {
         .buttonStyle(.plain)
         .serverRowActions(server, model: model, editing: $editing)
     }
+
+    private func expansionBinding(for sectionID: String) -> Binding<Bool> {
+        Binding {
+            !collapsedGroupIDs.contains(sectionID)
+        } set: { isExpanded in
+            if isExpanded {
+                collapsedGroupIDs.remove(sectionID)
+            } else {
+                collapsedGroupIDs.insert(sectionID)
+            }
+        }
+    }
 }
 
 struct ServerSplitView: View {
@@ -103,6 +116,7 @@ struct ServerSplitView: View {
     @State private var showingSettings = false
     @State private var searchText = ""
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var collapsedGroupIDs: Set<String> = []
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -163,7 +177,7 @@ struct ServerSplitView: View {
             List(selection: $selectedServerID) {
                 if showGroups {
                     ForEach(sections) { section in
-                        Section(section.name) {
+                        Section(section.name, isExpanded: expansionBinding(for: section.id)) {
                             ForEach(section.servers) { server in row(server) }
                         }
                     }
@@ -179,7 +193,7 @@ struct ServerSplitView: View {
     }
 
     private var filtered: [ServerConfig] {
-        ServerListLayout.filtered(model.servers, query: searchText)
+        ServerListLayout.filtered(model.servers, groups: model.settings.groups, query: searchText)
     }
 
     private var showGroups: Bool { !model.settings.groups.isEmpty }
@@ -193,6 +207,18 @@ struct ServerSplitView: View {
             .tag(server.id)
             .serverRowActions(server, model: model, editing: $editing)
     }
+
+    private func expansionBinding(for sectionID: String) -> Binding<Bool> {
+        Binding {
+            !collapsedGroupIDs.contains(sectionID)
+        } set: { isExpanded in
+            if isExpanded {
+                collapsedGroupIDs.remove(sectionID)
+            } else {
+                collapsedGroupIDs.insert(sectionID)
+            }
+        }
+    }
 }
 
 private struct GroupSection: Identifiable {
@@ -202,14 +228,16 @@ private struct GroupSection: Identifiable {
 }
 
 private enum ServerListLayout {
-    static func filtered(_ servers: [ServerConfig], query: String) -> [ServerConfig] {
+    static func filtered(_ servers: [ServerConfig], groups: [ServerGroup], query: String) -> [ServerConfig] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return servers }
 
         return servers.filter { server in
-            server.name.localizedStandardContains(trimmed) ||
+            let groupName = groups.first { $0.id == server.groupId }?.name ?? ""
+            return server.name.localizedStandardContains(trimmed) ||
             server.host.localizedStandardContains(trimmed) ||
-            server.username.localizedStandardContains(trimmed)
+            server.username.localizedStandardContains(trimmed) ||
+            groupName.localizedStandardContains(trimmed)
         }
     }
 

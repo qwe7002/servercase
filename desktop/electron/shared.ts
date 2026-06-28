@@ -13,6 +13,8 @@ export interface ServerConfig {
   authType: AuthType;
   /** Id of the {@link Group} this server belongs to, if any. */
   groupId?: string;
+  /** Cloud probe host id to use for overview status instead of SSH polling. */
+  probeHostId?: string;
   /** Present when authType === 'password'. */
   password?: string;
   /** PEM private key text, present when authType === 'key'. */
@@ -65,6 +67,36 @@ export interface ConnectionEvent {
   error?: string;
 }
 
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  code: number | null;
+}
+
+export interface PortForwardRequest {
+  serverId: string;
+  /** Local interface to bind. Defaults to 127.0.0.1. */
+  localHost?: string;
+  /** Local TCP port. Use 0 to let the OS choose a free port. */
+  localPort: number;
+  /** Host reached from the remote SSH server. Defaults to 127.0.0.1. */
+  remoteHost?: string;
+  remotePort: number;
+  /** Optional caller-owned label for UI/debug output. */
+  label?: string;
+}
+
+export interface PortForwardInfo {
+  id: string;
+  serverId: string;
+  localHost: string;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+  label?: string;
+  openedAt: number;
+}
+
 // ── Global settings ─────────────────────────────────────────────────────────
 
 /** A reusable shell command, runnable in any server's terminal. */
@@ -72,17 +104,6 @@ export interface Snippet {
   id: string;
   name: string;
   command: string;
-}
-
-/** Periodic export/import of the configuration to a JSON file on disk. */
-export interface AutoSyncSettings {
-  enabled: boolean;
-  /** Interval between automatic syncs, in minutes. */
-  intervalMinutes: number;
-  /** Absolute path of the sync file. Empty until the user picks one. */
-  filePath: string;
-  /** Epoch ms of the last successful sync, if any. */
-  lastSyncedAt?: number;
 }
 
 export interface BitwardenSettings {
@@ -123,6 +144,36 @@ export interface BridgeSettings {
   port: number;
 }
 
+/**
+ * Optional connection to a ServerCase Worker for cloud config sync and live
+ * probe status. The session token is intentionally NOT stored here — it lives
+ * in a local-only store and is never written to the sync file. Only the
+ * non-secret URL/email/preferences live in settings, so they sync across
+ * devices.
+ */
+export interface CloudSettings {
+  enabled: boolean;
+  /** Base URL of the worker, e.g. https://worker.example.com */
+  url: string;
+  /** Account email — display and login convenience (not a secret). */
+  email: string;
+  /** Push the config to the cloud automatically after local changes. */
+  autoPush: boolean;
+}
+
+export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
+export type TerminalColorScheme = 'charcoal' | 'black' | 'light' | 'solarized';
+
+/** Appearance/behaviour of the SSH terminal, shared across servers and synced. */
+export interface TerminalSettings {
+  fontSize: number;
+  cursorBlink: boolean;
+  cursorStyle: TerminalCursorStyle;
+  /** Lines of scrollback to keep. */
+  scrollback: number;
+  colorScheme: TerminalColorScheme;
+}
+
 /** A named group/folder used to organize the server list. */
 export interface Group {
   id: string;
@@ -132,8 +183,9 @@ export interface Group {
 export interface GlobalSettings {
   bitwarden: BitwardenSettings;
   snippets: Snippet[];
-  autoSync: AutoSyncSettings;
   bridge: BridgeSettings;
+  cloud: CloudSettings;
+  terminal: TerminalSettings;
   groups: Group[];
 }
 
@@ -180,9 +232,9 @@ export interface BitwardenStatus {
 }
 
 /**
- * Snapshot exchanged with the sync file. Secrets are deliberately excluded:
- * with Bitwarden they sync through the vault, and without Bitwarden they are
- * intentionally not portable.
+ * Secret-free configuration snapshot synced to the cloud (ServerCase Worker).
+ * Secrets are deliberately excluded: with Bitwarden they sync through the
+ * vault, and without Bitwarden they are intentionally not portable.
  */
 export interface SyncPayload {
   version: 1;
@@ -218,10 +270,14 @@ export const IpcChannels = {
   connect: 'sc:connect',
   disconnect: 'sc:disconnect',
   fetchStatus: 'sc:fetchStatus',
+  runCommand: 'sc:runCommand',
   shellOpen: 'sc:shell:open',
   shellData: 'sc:shell:data',
   shellResize: 'sc:shell:resize',
   shellClose: 'sc:shell:close',
+  portForwardOpen: 'sc:portForward:open',
+  portForwardClose: 'sc:portForward:close',
+  portForwardList: 'sc:portForward:list',
   // bitwarden secret vault (via `bw` CLI)
   bwStatus: 'sc:bw:status',
   bwConfigure: 'sc:bw:configure',
@@ -233,10 +289,6 @@ export const IpcChannels = {
   bwGet: 'sc:bw:get',
   bwList: 'sc:bw:list',
   bwDelete: 'sc:bw:delete',
-  // sync
-  syncExport: 'sc:sync:export',
-  syncImport: 'sc:sync:import',
-  syncPickFile: 'sc:sync:pickFile',
   // control bridge (for the MCP server)
   bridgeInfo: 'sc:bridge:info',
   bridgeSetEnabled: 'sc:bridge:setEnabled',

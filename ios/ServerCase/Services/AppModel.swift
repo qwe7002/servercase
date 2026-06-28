@@ -11,19 +11,32 @@ final class AppModel: ObservableObject {
     @Published var status: [UUID: ServerStatus] = [:]
     @Published var settings: GlobalSettings = SettingsStore.load()
     @Published var bitwardenStatus: BitwardenStatus?
+    @Published var cloudSession: CloudSession? = CloudSessionStore.load()
+    @Published var probeHosts: [ProbeHost] = []
 
     let vault = BitwardenVault()
+    private let cloud = CloudService()
 
     private var services: [UUID: SSHService] = [:]
     private var collectors: [UUID: StatusParser.CollectorState] = [:]
     private var connectionTokens: [UUID: UUID] = [:]
     private var pollTask: Task<Void, Never>?
-    private var autoSyncTask: Task<Void, Never>?
+    private var cloudPushTask: Task<Void, Never>?
+    private var probeStreamTask: URLSessionWebSocketTask?
+    private var probeStreamLoop: Task<Void, Never>?
+    /// Set while applying a pulled snapshot, to suppress the auto-push echo.
+    private var applyingRemote = false
+    /// The FCM token we've already registered, to avoid repeats.
+    private var registeredPushToken: String?
 
     init() {
         let bw = settings.bitwarden
         Task { await vault.configure(bw) }
-        restartAutoSync()
+        // Register the FCM token with the worker whenever it's (re)issued.
+        NotificationCenter.default.addObserver(forName: .fcmTokenReceived, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.registerPushToken() }
+        }
+        startProbeStream()
     }
 
     private var vaultEnabled: Bool { settings.bitwarden.enabled }
@@ -56,6 +69,7 @@ final class AppModel: ObservableObject {
     /// Persists the server list, stripping secrets when the vault owns them.
     private func saveServers() {
         ServerStore.save(vaultEnabled ? servers.map { $0.strippingSecrets() } : servers)
+        scheduleCloudAutoPush()
     }
 
     // MARK: Connection
@@ -114,10 +128,40 @@ final class AppModel: ObservableObject {
 
     func service(_ id: UUID) -> SSHService? { services[id] }
 
+    private func connectedService(for server: ServerConfig) async throws -> SSHService {
+        if let service = services[server.id], await service.isConnected {
+            return service
+        }
+
+        var cfg = server
+        if vaultEnabled, server.password == nil, server.privateKey == nil,
+           let secrets = try? await vault.getSecrets(server.id.uuidString) {
+            cfg = server.merging(secrets)
+        }
+
+        let service = SSHService(config: cfg)
+        services[server.id] = service
+        collectors[server.id] = StatusParser.CollectorState()
+        connState[server.id] = .connecting
+        do {
+            try await service.connect()
+            connState[server.id] = .connected
+            return service
+        } catch {
+            services[server.id] = nil
+            connState[server.id] = .error(error.localizedDescription)
+            throw error
+        }
+    }
+
     // MARK: Status polling
 
     func startPolling(_ id: UUID) {
         pollTask?.cancel()
+        if servers.first(where: { $0.id == id })?.probeHostId != nil {
+            startProbeStream()
+            return
+        }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollOnce(id)
@@ -146,13 +190,16 @@ final class AppModel: ObservableObject {
     // MARK: Settings
 
     func updateSettings(_ new: GlobalSettings) {
+        let oldCloud = settings.cloud
         settings = new
         SettingsStore.save(new)
         let bw = new.bitwarden
         Task { await vault.configure(bw) }
         // Re-persist so secrets are stripped (vault on) or restored (vault off).
         saveServers()
-        restartAutoSync()
+        if oldCloud != new.cloud {
+            restartProbeStream()
+        }
     }
 
     func setBitwardenEnabled(_ enabled: Bool) {
@@ -175,7 +222,7 @@ final class AppModel: ObservableObject {
     }
 
     func lockVault() async {
-        try? await vault.lock()
+        await vault.lock()
         await refreshBitwardenStatus()
     }
 
@@ -198,39 +245,253 @@ final class AppModel: ObservableObject {
         try await vault.test()
     }
 
-    // MARK: Auto-sync
+    // MARK: Cloud sync
 
-    private func restartAutoSync() {
-        autoSyncTask?.cancel()
-        guard settings.autoSync.enabled else { return }
-        let minutes = max(1, settings.autoSync.intervalMinutes)
-        autoSyncTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(minutes) * 60_000_000_000)
-                if Task.isCancelled { break }
-                self?.syncToAutoFile()
+    var cloudSignedIn: Bool { cloudSession?.isValid == true }
+
+    /// Logs in (or registers) and stores the session locally.
+    func cloudAuthenticate(register: Bool, email: String, password: String) async throws {
+        let url = settings.cloud.url
+        let result = register
+            ? try await cloud.register(url: url, email: email, password: password)
+            : try await cloud.login(url: url, email: email, password: password)
+        let session = CloudSession(token: result.token, expiresAt: result.expiresAt, user: result.user)
+        cloudSession = session
+        CloudSessionStore.save(session)
+        var next = settings
+        next.cloud.email = result.user.email
+        updateSettings(next)
+        registerPushToken()
+        await refreshProbes()
+        startProbeStream()
+    }
+
+    /// Registers the current FCM token with the worker once signed in (idempotent).
+    func registerPushToken() {
+        guard settings.cloud.enabled, !settings.cloud.url.isEmpty,
+              let token = PushToken.current, token != registeredPushToken,
+              let session = cloudSession, session.isValid else { return }
+        Task {
+            do {
+                try await cloud.registerDevice(url: settings.cloud.url, sessionToken: session.token, fcmToken: token)
+                registeredPushToken = token
+            } catch {
+                // best-effort; retried on the next token refresh or sign-in
             }
         }
     }
 
+    /// Pushes the local config to the cloud. Returns the new revision.
     @discardableResult
-    func syncToAutoFile() -> Bool {
+    func cloudPushNow() async throws -> Int {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
         let payload = SyncService.makePayload(servers: servers, settings: settings)
-        guard let data = try? SyncService.encode(payload),
-              (try? data.write(to: SyncService.autoSyncURL)) != nil else { return false }
-        settings.autoSync.lastSyncedAt = Date()
-        SettingsStore.save(settings)
-        return true
+        let result = try await cloud.putSync(url: settings.cloud.url, token: session.token,
+                                             payload: payload, baseVersion: session.syncVersion)
+        updateCloudSyncState(session, version: result.version, at: result.updatedAt)
+        return result.version
     }
 
-    /// Secret-free snapshot for manual export via the document picker.
-    func exportData() throws -> Data {
-        try SyncService.encode(SyncService.makePayload(servers: servers, settings: settings))
+    /// Pulls the cloud config and replaces local servers + settings.
+    func cloudPull() async throws {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
+        let result = try await cloud.getSync(url: settings.cloud.url, token: session.token)
+        applyingRemote = true
+        servers = result.payload.servers
+        updateSettings(result.payload.settings)
+        applyingRemote = false
+        updateCloudSyncState(session, version: result.version, at: result.updatedAt)
+        startProbeStream()
     }
 
-    func importData(_ data: Data) throws {
-        let payload = try SyncService.decode(data)
-        servers = payload.servers
-        updateSettings(payload.settings)
+    func cloudSignOut() {
+        cloudSession = nil
+        probeHosts = []
+        stopProbeStream()
+        CloudSessionStore.save(nil)
     }
+
+    // MARK: Probe hosts
+
+    func probeHost(for server: ServerConfig) -> ProbeHost? {
+        guard let id = server.probeHostId else { return nil }
+        return probeHosts.first { $0.id == id }
+    }
+
+    func probeStatus(for server: ServerConfig) -> ServerStatus? {
+        probeHost(for: server)?.latest?.serverStatus
+    }
+
+    func refreshProbes() async {
+        guard settings.cloud.enabled, !settings.cloud.url.isEmpty,
+              let session = cloudSession, session.isValid else { return }
+        do {
+            probeHosts = try await cloud.listProbes(url: settings.cloud.url, token: session.token).hosts
+        } catch {
+            // Best-effort; the settings page surfaces explicit create/delete errors.
+        }
+    }
+
+    func startProbeStream() {
+        guard settings.cloud.enabled, !settings.cloud.url.isEmpty,
+              let session = cloudSession, session.isValid else {
+            stopProbeStream()
+            return
+        }
+        if probeStreamTask != nil { return }
+
+        Task { await refreshProbes() }
+
+        do {
+            let url = try cloud.probeStreamURL(baseURL: settings.cloud.url, token: session.token)
+            let task = URLSession.shared.webSocketTask(with: url)
+            probeStreamTask = task
+            task.resume()
+            probeStreamLoop = Task { [weak self, weak task] in
+                guard let task else { return }
+                await self?.receiveProbeStream(task)
+            }
+        } catch {
+            // The settings page surfaces explicit cloud errors; stream startup is best-effort.
+        }
+    }
+
+    func stopProbeStream() {
+        probeStreamLoop?.cancel()
+        probeStreamLoop = nil
+        probeStreamTask?.cancel(with: .goingAway, reason: nil)
+        probeStreamTask = nil
+    }
+
+    private func restartProbeStream() {
+        stopProbeStream()
+        startProbeStream()
+    }
+
+    private func receiveProbeStream(_ task: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            do {
+                let message = try await task.receive()
+                switch message {
+                case .string(let text):
+                    handleProbeStreamMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        handleProbeStreamMessage(text)
+                    }
+                @unknown default:
+                    break
+                }
+            } catch {
+                if !Task.isCancelled {
+                    probeStreamTask = nil
+                    probeStreamLoop = nil
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    startProbeStream()
+                }
+                return
+            }
+        }
+    }
+
+    private func handleProbeStreamMessage(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let message = try? CloudService.decoder.decode(ProbeStreamMessage.self, from: data),
+              message.type == "snapshot",
+              let hostId = message.hostId,
+              let snapshot = message.snapshot else { return }
+        upsertProbeSnapshot(hostId: hostId, at: message.at, snapshot: snapshot)
+    }
+
+    private func upsertProbeSnapshot(hostId: String, at: Date?, snapshot: ProbeSnapshot) {
+        if let index = probeHosts.firstIndex(where: { $0.id == hostId }) {
+            probeHosts[index].latest = snapshot
+            probeHosts[index].lastSeenAt = at ?? Date()
+        } else {
+            probeHosts.append(
+                ProbeHost(
+                    id: hostId,
+                    name: snapshot.hostname.isEmpty ? hostId : snapshot.hostname,
+                    createdAt: Date(),
+                    lastSeenAt: at ?? Date(),
+                    latest: snapshot
+                )
+            )
+        }
+    }
+
+    func createProbe(name: String) async throws -> ProbeCreateResult {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
+        let result = try await cloud.createProbe(url: settings.cloud.url, token: session.token, name: name)
+        await refreshProbes()
+        return result
+    }
+
+    func deleteProbe(_ host: ProbeHost) async throws {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
+        try await cloud.deleteProbe(url: settings.cloud.url, token: session.token, id: host.id)
+        probeHosts.removeAll { $0.id == host.id }
+        for i in servers.indices where servers[i].probeHostId == host.id {
+            servers[i].probeHostId = nil
+        }
+        saveServers()
+    }
+
+    func installProbe(hostId: String, token: String, on server: ServerConfig) async throws -> String {
+        let service = try await connectedService(for: server)
+        let output = try await service.run(probeInstallCommand(apiURL: settings.cloud.url, token: token, hostName: server.host))
+        if let index = servers.firstIndex(where: { $0.id == server.id }) {
+            servers[index].probeHostId = hostId
+            saveServers()
+        }
+        await refreshProbes()
+        startProbeStream()
+        return output
+    }
+
+    private func updateCloudSyncState(_ session: CloudSession, version: Int, at: Date) {
+        var updated = session
+        updated.syncVersion = version
+        updated.syncedAt = at
+        cloudSession = updated
+        CloudSessionStore.save(updated)
+    }
+
+    /// Debounced auto-push after local changes, when enabled and signed in.
+    private func scheduleCloudAutoPush() {
+        guard !applyingRemote, settings.cloud.enabled, settings.cloud.autoPush,
+              cloudSession?.isValid == true else { return }
+        cloudPushTask?.cancel()
+        cloudPushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if Task.isCancelled { return }
+            guard let self else { return }
+            _ = try? await self.cloudPushNow()
+        }
+    }
+}
+
+private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh"
+
+private func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+private func probeInstallCommand(apiURL: String, token: String, hostName: String) -> String {
+    [
+        "set -e",
+        "tmp=\"$(mktemp)\"",
+        "if command -v curl >/dev/null 2>&1; then curl -fsSL \(shellQuote(probeInstallScriptURL)) -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \(shellQuote(probeInstallScriptURL)); else echo \"need curl or wget\"; exit 1; fi",
+        "chmod 700 \"$tmp\"",
+        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip",
+        "rm -f \"$tmp\"",
+    ].joined(separator: "; ")
 }

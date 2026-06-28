@@ -1,0 +1,27 @@
+{
+  "name": "servercase-worker",
+  "version": "0.1.0",
+  "description": "Cloudflare Worker for ServerCase: account login, config sync, probe ingest and push-notification scaffolding",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:panel": "npm --prefix panel install && npm --prefix panel run build",
+    "dev": "wrangler dev",
+    "predeploy": "npm run build:panel",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "migrate:local": "wrangler d1 migrations apply servercase --local",
+    "migrate:remote": "wrangler d1 migrations apply servercase --remote"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "drizzle-kit": "^0.31.1",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.0.0"
+  }
+}

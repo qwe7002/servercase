@@ -14,11 +14,18 @@ struct ServerGroup: Identifiable, Codable, Equatable, Hashable {
     var name: String
 }
 
-/// Periodic export/import of the configuration to a JSON file.
-struct AutoSyncSettings: Codable, Equatable {
+/// Optional connection to a ServerCase Worker for cloud config sync. The
+/// session token is not stored here — it lives in `CloudSessionStore` and is
+/// never written to the synced payload. Only the non-secret URL/email/
+/// preferences live in settings, so they sync across devices.
+struct CloudSettings: Codable, Equatable {
     var enabled: Bool = false
-    var intervalMinutes: Int = 30
-    var lastSyncedAt: Date? = nil
+    /// Base URL of the worker, e.g. https://worker.example.com
+    var url: String = ""
+    /// Account email — display and login convenience (not a secret).
+    var email: String = ""
+    /// Push the config to the cloud automatically after local changes.
+    var autoPush: Bool = false
 }
 
 /// Bitwarden keychain configuration. We speak the Bitwarden REST API directly
@@ -39,11 +46,51 @@ struct BitwardenSettings: Codable, Equatable {
     var itemPrefix: String = "ServerCase/"
 }
 
+enum TerminalCursorStyle: String, Codable, CaseIterable, Identifiable {
+    case block, underline, bar
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
+enum TerminalColorScheme: String, Codable, CaseIterable, Identifiable {
+    case charcoal, black, light, solarized
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+
+    /// Background/foreground hex, shared with the desktop and Android clients.
+    var backgroundHex: String {
+        switch self {
+        case .charcoal: return "0b0d12"
+        case .black: return "000000"
+        case .light: return "f5f5f5"
+        case .solarized: return "002b36"
+        }
+    }
+    var foregroundHex: String {
+        switch self {
+        case .charcoal: return "d6dbe5"
+        case .black: return "e5e5e5"
+        case .light: return "1c1c1c"
+        case .solarized: return "93a1a1"
+        }
+    }
+}
+
+/// Appearance/behaviour of the SSH terminal, shared across servers and synced.
+struct TerminalSettings: Codable, Equatable {
+    var fontSize: Int = 13
+    var cursorBlink: Bool = true
+    var cursorStyle: TerminalCursorStyle = .block
+    var scrollback: Int = 1000
+    var colorScheme: TerminalColorScheme = .charcoal
+}
+
 /// All global, cross-server settings.
 struct GlobalSettings: Codable, Equatable {
     var bitwarden = BitwardenSettings()
     var snippets: [Snippet] = []
-    var autoSync = AutoSyncSettings()
+    var cloud = CloudSettings()
+    var terminal = TerminalSettings()
     var groups: [ServerGroup] = []
 }
 

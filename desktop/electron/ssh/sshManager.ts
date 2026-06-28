@@ -1,4 +1,5 @@
 import path from 'node:path';
+import net from 'node:net';
 import {
   Client,
   type ClientChannel,
@@ -8,6 +9,8 @@ import {
 import type {
   ServerConfig,
   ServerStatus,
+  PortForwardInfo,
+  PortForwardRequest,
   SftpEntry,
   SftpList,
 } from '../shared.js';
@@ -21,6 +24,7 @@ interface Connection {
   client: Client;
   collector: CollectorState;
   shells: Map<string, ClientChannel>;
+  forwards: Map<string, PortForward>;
   sftp?: SFTPWrapper;
   /** Pre-auth SSH banner (e.g. /etc/issue.net), shown when a shell opens. */
   banner?: string;
@@ -30,6 +34,11 @@ interface Connection {
   publicIpv6?: string | null;
   /** Epoch ms of the last public-IP refresh (throttles the lookup). */
   publicIpAt?: number;
+}
+
+interface PortForward extends PortForwardInfo {
+  server: net.Server;
+  sockets: Set<net.Socket | ClientChannel>;
 }
 
 /** Looks up the server's public addresses from the internet. */
@@ -111,6 +120,7 @@ export class SshManager {
             client,
             collector: {},
             shells: new Map(),
+            forwards: new Map(),
             banner: banner || undefined,
             motd: this.readMotd(client),
           });
@@ -118,11 +128,13 @@ export class SshManager {
           resolve();
         })
         .on('error', (err: Error) => {
+          this.closePortForwardsFor(cfg.id);
           this.conns.delete(cfg.id);
           this.onState(cfg.id, 'error', err.message);
           reject(err);
         })
         .on('close', () => {
+          this.closePortForwardsFor(cfg.id);
           this.conns.delete(cfg.id);
           this.onState(cfg.id, 'disconnected');
         })
@@ -143,8 +155,93 @@ export class SshManager {
     const conn = this.conns.get(serverId);
     if (!conn) return;
     for (const shell of conn.shells.values()) shell.close();
+    for (const forward of conn.forwards.values()) closeForward(forward);
     conn.client.end();
     this.conns.delete(serverId);
+  }
+
+  async openPortForward(request: PortForwardRequest): Promise<PortForwardInfo> {
+    const conn = this.conns.get(request.serverId);
+    if (!conn) throw new Error('not connected');
+
+    const localHost = (request.localHost || '127.0.0.1').trim();
+    const remoteHost = (request.remoteHost || '127.0.0.1').trim();
+    const localPort = validatePort(request.localPort, 'localPort', true);
+    const remotePort = validatePort(request.remotePort, 'remotePort', false);
+    if (!localHost) throw new Error('localHost is required');
+    if (!remoteHost) throw new Error('remoteHost is required');
+
+    const id = `pf_${Date.now().toString(36)}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const sockets = new Set<net.Socket | ClientChannel>();
+
+    const server = net.createServer((localSocket) => {
+      sockets.add(localSocket);
+      localSocket.on('close', () => sockets.delete(localSocket));
+      localSocket.on('error', () => undefined);
+
+      conn.client.forwardOut(
+        localSocket.remoteAddress || localHost,
+        localSocket.remotePort || 0,
+        remoteHost,
+        remotePort,
+        (err, remoteChannel) => {
+          if (err) {
+            localSocket.destroy(err);
+            return;
+          }
+          sockets.add(remoteChannel);
+          remoteChannel.on('close', () => sockets.delete(remoteChannel));
+          remoteChannel.on('error', () => undefined);
+          localSocket.pipe(remoteChannel).pipe(localSocket);
+          localSocket.on('close', () => remoteChannel.destroy());
+          remoteChannel.on('close', () => localSocket.destroy());
+        },
+      );
+    });
+
+    const opened = await listen(server, localHost, localPort);
+    const actualPort = opened && typeof opened === 'object' ? opened.port : localPort;
+    const info: PortForward = {
+      id,
+      serverId: request.serverId,
+      localHost,
+      localPort: actualPort,
+      remoteHost,
+      remotePort,
+      label: request.label?.trim() || undefined,
+      openedAt: Date.now(),
+      server,
+      sockets,
+    };
+    conn.forwards.set(id, info);
+    server.on('close', () => conn.forwards.delete(id));
+    return presentForward(info);
+  }
+
+  closePortForward(forwardId: string): void {
+    for (const conn of this.conns.values()) {
+      const forward = conn.forwards.get(forwardId);
+      if (!forward) continue;
+      closeForward(forward);
+      conn.forwards.delete(forwardId);
+      return;
+    }
+  }
+
+  private closePortForwardsFor(serverId: string): void {
+    const conn = this.conns.get(serverId);
+    if (!conn) return;
+    for (const forward of conn.forwards.values()) closeForward(forward);
+    conn.forwards.clear();
+  }
+
+  listPortForwards(serverId?: string): PortForwardInfo[] {
+    const conns = serverId
+      ? [...(this.conns.get(serverId)?.forwards.values() ?? [])]
+      : [...this.conns.values()].flatMap((conn) => [...conn.forwards.values()]);
+    return conns.map(presentForward);
   }
 
   fetchStatus(serverId: string): Promise<ServerStatus> {
@@ -418,5 +515,53 @@ function toEntry(dir: string, it: FileEntry): SftpEntry {
     sizeBytes: attrs.size ?? 0,
     modifiedAt: (attrs.mtime ?? 0) * 1000,
     mode: (attrs.mode & 0o777).toString(8).padStart(4, '0'),
+  };
+}
+
+function validatePort(port: number, name: string, allowZero: boolean): number {
+  if (!Number.isInteger(port)) throw new Error(`${name} must be an integer`);
+  const min = allowZero ? 0 : 1;
+  if (port < min || port > 65535) {
+    throw new Error(`${name} must be between ${min} and 65535`);
+  }
+  return port;
+}
+
+function listen(
+  server: net.Server,
+  host: string,
+  port: number,
+): Promise<net.AddressInfo | string | null> {
+  return new Promise((resolve, reject) => {
+    const onError = (err: Error) => {
+      server.off('listening', onListening);
+      reject(err);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      resolve(server.address());
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
+  });
+}
+
+function closeForward(forward: PortForward): void {
+  for (const socket of forward.sockets) socket.destroy();
+  forward.sockets.clear();
+  forward.server.close(() => undefined);
+}
+
+function presentForward(forward: PortForward): PortForwardInfo {
+  return {
+    id: forward.id,
+    serverId: forward.serverId,
+    localHost: forward.localHost,
+    localPort: forward.localPort,
+    remoteHost: forward.remoteHost,
+    remotePort: forward.remotePort,
+    label: forward.label,
+    openedAt: forward.openedAt,
   };
 }

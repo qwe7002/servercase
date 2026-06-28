@@ -3,6 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { useSettings } from '../store/settings';
+import { TERMINAL_SCHEMES } from '../lib/terminalTheme';
 import { Button } from '@/components/ui/button';
 import { ChevronDown, Code2 } from 'lucide-react';
 
@@ -14,7 +15,10 @@ interface Props {
 export function Terminal({ serverId }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const shellIdRef = useRef<string | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const snippets = useSettings((s) => s.settings.snippets);
+  const terminal = useSettings((s) => s.settings.terminal);
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -24,16 +28,23 @@ export function Terminal({ serverId }: Props) {
 
     const shellId = `sh-${Math.random().toString(36).slice(2, 8)}`;
     shellIdRef.current = shellId;
+    // Read current settings at creation; later changes apply via the effect below.
+    const t = useSettings.getState().settings.terminal;
+    const scheme = TERMINAL_SCHEMES[t.colorScheme];
     const term = new XTerm({
       fontFamily: 'Menlo, Consolas, monospace',
-      fontSize: 13,
-      cursorBlink: true,
-      theme: { background: '#0b0d12', foreground: '#d6dbe5' },
+      fontSize: t.fontSize,
+      cursorBlink: t.cursorBlink,
+      cursorStyle: t.cursorStyle,
+      scrollback: t.scrollback,
+      theme: { background: scheme.background, foreground: scheme.foreground },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
     fit.fit();
+    termRef.current = term;
+    fitRef.current = fit;
 
     let disposed = false;
 
@@ -60,6 +71,8 @@ export function Terminal({ serverId }: Props) {
     return () => {
       disposed = true;
       shellIdRef.current = null;
+      termRef.current = null;
+      fitRef.current = null;
       ro.disconnect();
       offOutput();
       offClosed();
@@ -67,6 +80,25 @@ export function Terminal({ serverId }: Props) {
       term.dispose();
     };
   }, [serverId]);
+
+  // Apply terminal-setting changes to the live session without recreating it.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const scheme = TERMINAL_SCHEMES[terminal.colorScheme];
+    term.options.fontSize = terminal.fontSize;
+    term.options.cursorBlink = terminal.cursorBlink;
+    term.options.cursorStyle = terminal.cursorStyle;
+    term.options.scrollback = terminal.scrollback;
+    term.options.theme = { background: scheme.background, foreground: scheme.foreground };
+    fitRef.current?.fit();
+  }, [
+    terminal.fontSize,
+    terminal.cursorBlink,
+    terminal.cursorStyle,
+    terminal.scrollback,
+    terminal.colorScheme,
+  ]);
 
   const runSnippet = (command: string) => {
     const api = window.servercase;
@@ -77,7 +109,10 @@ export function Terminal({ serverId }: Props) {
   };
 
   return (
-    <div className="m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-[#0b0d12]">
+    <div
+      className="m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
+      style={{ background: TERMINAL_SCHEMES[terminal.colorScheme].background }}
+    >
       <div className="relative flex items-center justify-end border-b border-white/5 px-2 py-1.5">
         <Button
           size="sm"

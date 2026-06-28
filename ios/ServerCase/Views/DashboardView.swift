@@ -8,8 +8,11 @@ struct DashboardView: View {
     @State private var selectedTab: ServerDetailTab = .overview
 
     private var state: ConnectionState { model.state(server.id) }
-    private var status: ServerStatus? { model.status[server.id] }
+    private var probeHost: ProbeHost? { model.probeHost(for: server) }
+    private var probeStatus: ServerStatus? { model.probeStatus(for: server) }
+    private var status: ServerStatus? { probeStatus ?? model.status[server.id] }
     private var connected: Bool { state == .connected }
+    private var usesProbe: Bool { server.probeHostId != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -57,7 +60,7 @@ struct DashboardView: View {
         case .overview:
             overview
         case .terminal:
-            TerminalView(server: server)
+            TerminalTabsView(server: server)
         case .files:
             FilesView(server: server)
         }
@@ -80,7 +83,11 @@ struct DashboardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
 
-                if !connected {
+                if usesProbe, probeStatus == nil {
+                    placeholder(probeHost == nil
+                                ? "Linked probe host was not found. Choose another probe in Edit server."
+                                : "Waiting for the linked probe to report status…")
+                } else if !connected && probeStatus == nil {
                     notConnected
                 } else if let status {
                     LazyVGrid(columns: cardColumns, alignment: .leading, spacing: 10) {

@@ -11,6 +11,7 @@ struct ServerFormView: View {
     @State private var host = ""
     @State private var port = "22"
     @State private var username = "root"
+    @State private var probeHostId = ""
     @State private var authType: AuthType = .password
     @State private var password = ""
     @State private var privateKey = ""
@@ -40,6 +41,15 @@ struct ServerFormView: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
 
+                Section("Probe data") {
+                    Picker("Overview source", selection: $probeHostId) {
+                        Text("Use SSH polling").tag("")
+                        ForEach(model.probeHosts) { host in
+                            Text(host.name).tag(host.id)
+                        }
+                    }
+                }
+
                 Section("Authentication") {
                     Picker("Method", selection: $authType) {
                         ForEach(AuthType.allCases) { Text($0.label).tag($0) }
@@ -67,6 +77,7 @@ struct ServerFormView: View {
                 }
             }
             .onAppear(perform: populate)
+            .task { await model.refreshProbes() }
         }
     }
 
@@ -74,6 +85,7 @@ struct ServerFormView: View {
         guard let e = existing else { return }
         name = e.name; host = e.host; port = String(e.port); username = e.username
         groupId = e.groupId ?? ""
+        probeHostId = e.probeHostId ?? ""
         authType = e.authType
         password = e.password ?? ""
         privateKey = e.privateKey ?? ""
@@ -84,6 +96,7 @@ struct ServerFormView: View {
         var server = existing ?? ServerConfig(name: name, host: host)
         server.name = name.trimmingCharacters(in: .whitespaces)
         server.groupId = groupId.isEmpty ? nil : groupId
+        server.probeHostId = probeHostId.isEmpty ? nil : probeHostId
         server.host = host.trimmingCharacters(in: .whitespaces)
         server.port = Int(port) ?? 22
         server.username = username.trimmingCharacters(in: .whitespaces)

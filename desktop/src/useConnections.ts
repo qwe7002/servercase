@@ -7,6 +7,7 @@ import { useServers } from './store/servers';
  */
 export function useConnections(): void {
   const selectedId = useServers((s) => s.selectedId);
+  const servers = useServers((s) => s.servers);
   const connState = useServers((s) => s.connState);
   const setConnState = useServers((s) => s.setConnState);
   const setStatus = useServers((s) => s.setStatus);
@@ -22,9 +23,11 @@ export function useConnections(): void {
   // Poll status for the selected, connected server.
   useEffect(() => {
     const api = window.servercase;
+    const selected = servers.find((s) => s.id === selectedId);
     if (
       !api ||
       !selectedId ||
+      selected?.probeHostId ||
       connState[selectedId] !== 'connected'
     ) {
       return;
@@ -46,5 +49,5 @@ export function useConnections(): void {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [selectedId, connState, setStatus]);
+  }, [selectedId, servers, connState, setStatus]);
 }

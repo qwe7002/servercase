@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -31,9 +30,15 @@ struct SettingsView: View {
                     }
 
                     NavigationLink {
-                        SyncSettingsPage(draft: $draft, message: $message)
+                        CloudSettingsPage(draft: $draft, message: $message)
                     } label: {
-                        settingsRow("Sync", systemImage: "arrow.triangle.2.circlepath", detail: syncDetail)
+                        settingsRow("Cloud", systemImage: "icloud", detail: cloudDetail)
+                    }
+
+                    NavigationLink {
+                        TerminalSettingsPage(draft: $draft)
+                    } label: {
+                        settingsRow("Terminal", systemImage: "terminal", detail: "\(draft.terminal.fontSize)pt")
                     }
                 }
 
@@ -61,8 +66,9 @@ struct SettingsView: View {
         return status.state.rawValue.capitalized
     }
 
-    private var syncDetail: String {
-        draft.autoSync.enabled ? "Every \(draft.autoSync.intervalMinutes) min" : "Manual"
+    private var cloudDetail: String {
+        guard draft.cloud.enabled else { return "Off" }
+        return model.cloudSignedIn ? "Signed in" : "Signed out"
     }
 
     private func settingsRow(_ title: String, systemImage: String, detail: String) -> some View {
@@ -269,68 +275,330 @@ private struct SnippetsSettingsPage: View {
     }
 }
 
-private struct SyncSettingsPage: View {
+private struct CloudSettingsPage: View {
     @EnvironmentObject private var model: AppModel
     @Binding var draft: GlobalSettings
     @Binding var message: String?
 
-    @State private var showExporter = false
-    @State private var showImporter = false
-    @State private var exportDoc: SyncDocument?
+    @State private var email = ""
+    @State private var password = ""
+    @State private var busy = false
 
     var body: some View {
         Form {
             Section {
-                Toggle("Automatic config sync", isOn: $draft.autoSync.enabled)
-                Stepper("Every \(draft.autoSync.intervalMinutes) min",
-                        value: $draft.autoSync.intervalMinutes, in: 1...720)
-                if let date = draft.autoSync.lastSyncedAt {
-                    Text("Last synced \(date.formatted())").font(.footnote).foregroundStyle(.secondary)
-                }
+                Toggle("ServerCase Cloud", isOn: $draft.cloud.enabled)
             } footer: {
-                Text("Writes the server list and settings to a JSON file. Secrets are excluded.")
+                Text("Sync your server list and settings to a ServerCase Worker. Secrets are never uploaded — they sync through Bitwarden — and your session token stays on this device.")
             }
 
-            Section {
-                Button("Sync now") {
-                    message = model.syncToAutoFile() ? "Synced to app storage." : "Sync failed."
+            if draft.cloud.enabled {
+                Section("Worker") {
+                    TextField("https://worker.example.com", text: $draft.cloud.url)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .keyboardType(.URL)
                 }
-                Button("Export…") {
-                    exportDoc = (try? model.exportData()).map { SyncDocument(data: $0) }
-                    if exportDoc != nil { showExporter = true }
+
+                if model.cloudSignedIn {
+                    Section("Account") {
+                        HStack {
+                            Text("Signed in")
+                            Spacer()
+                            Text(model.cloudSession?.user.email ?? "").foregroundStyle(.secondary)
+                        }
+                        Button("Push to cloud") { push() }.disabled(busy)
+                        Button("Pull from cloud") { pull() }.disabled(busy)
+                        NavigationLink {
+                            ProbeHostsPage(message: $message)
+                        } label: {
+                            Label("Probe hosts", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        Toggle("Auto-push on changes", isOn: $draft.cloud.autoPush)
+                        Button("Sign out", role: .destructive) { model.cloudSignOut() }
+                        if let session = model.cloudSession, let at = session.syncedAt {
+                            Text("Last synced \(at.formatted()) · revision \(session.syncVersion ?? 0)")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Section {
+                        TextField("Email", text: $email)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .keyboardType(.emailAddress)
+                        SecureField("Password", text: $password)
+                        Button("Sign in") { authenticate(register: false) }
+                            .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.isEmpty)
+                        Button("Create account") { authenticate(register: true) }
+                            .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.count < 8)
+                    } header: {
+                        Text("Sign in")
+                    } footer: {
+                        Text("New accounts need a password of at least 8 characters.")
+                    }
                 }
-                Button("Import…") { showImporter = true }
             }
 
             if let message {
                 Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Sync")
+        .navigationTitle("Cloud")
         .navigationBarTitleDisplayMode(.inline)
-        .fileExporter(isPresented: $showExporter, document: exportDoc,
-                      contentType: .json, defaultFilename: "servercase-sync") { _ in }
-        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json]) { result in
-            importConfig(result)
+    }
+
+    private func authenticate(register: Bool) {
+        busy = true; message = nil
+        Task {
+            do {
+                try await model.cloudAuthenticate(
+                    register: register,
+                    email: email.trimmingCharacters(in: .whitespaces),
+                    password: password)
+                password = ""
+                message = register ? "Account created." : "Signed in."
+            } catch {
+                message = errorText(error)
+            }
+            busy = false
         }
     }
 
-    private func importConfig(_ result: Result<URL, Error>) {
-        switch result {
-        case .success(let url):
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+    private func push() {
+        busy = true; message = nil
+        Task {
             do {
-                let data = try Data(contentsOf: url)
-                try model.importData(data)
+                let version = try await model.cloudPushNow()
+                message = "Pushed to cloud (revision \(version))."
+            } catch {
+                message = errorText(error)
+            }
+            busy = false
+        }
+    }
+
+    private func pull() {
+        busy = true; message = nil
+        Task {
+            do {
+                try await model.cloudPull()
                 draft = model.settings
-                message = "Configuration imported."
+                message = "Pulled from cloud."
+            } catch {
+                message = errorText(error)
+            }
+            busy = false
+        }
+    }
+
+    private func errorText(_ error: Error) -> String {
+        if let ce = error as? CloudError, ce.status == 409 {
+            return "The cloud copy changed since your last sync. Pull first, then push."
+        }
+        return error.localizedDescription
+    }
+}
+
+private struct ProbeHostsPage: View {
+    @EnvironmentObject private var model: AppModel
+    @Binding var message: String?
+
+    @State private var name = ""
+    @State private var busy = false
+    @State private var selectedServerId: UUID?
+    @State private var newToken: NewProbeToken?
+    @State private var installLog = ""
+
+    var body: some View {
+        Form {
+            Section("Add host") {
+                TextField("Host name", text: $name)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Create probe") { create() }
+                    .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                Picker("Install on", selection: $selectedServerId) {
+                    Text("Choose server").tag(Optional<UUID>.none)
+                    ForEach(model.servers) { server in
+                        Text(server.name).tag(Optional(server.id))
+                    }
+                }
+                Button("Create and install") {
+                    createAndInstall()
+                }
+                .disabled(busy || selectedServerId == nil)
+            }
+
+            if let newToken {
+                Section {
+                    Text(newToken.token)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Button("Copy token") {
+                        UIPasteboard.general.string = newToken.token
+                    }
+
+                    Picker("Install on", selection: $selectedServerId) {
+                        Text("Choose server").tag(Optional<UUID>.none)
+                        ForEach(model.servers) { server in
+                            Text(server.name).tag(Optional(server.id))
+                        }
+                    }
+                    Button("Install on selected server") {
+                        install(newToken)
+                    }
+                    .disabled(busy || selectedServerId == nil)
+                } header: {
+                    Text("Probe token for \(newToken.name)")
+                } footer: {
+                    Text("The token is shown only once. Installation uses the selected server's SSH connection and installs a user-level probe service.")
+                }
+            }
+
+            Section("Hosts") {
+                if model.probeHosts.isEmpty {
+                    Text("No probe hosts yet.").foregroundStyle(.secondary)
+                }
+                ForEach(model.probeHosts) { host in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(host.name)
+                            Spacer()
+                            Circle()
+                                .fill(isOnline(host) ? Palette.good : Color.secondary.opacity(0.4))
+                                .frame(width: 8, height: 8)
+                        }
+                        if let snapshot = host.latest {
+                            Text("\(snapshot.hostname.isEmpty ? "–" : snapshot.hostname) · \(snapshot.kernel.isEmpty ? "–" : snapshot.kernel)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Waiting for first snapshot…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete(perform: delete)
+
+                Button("Refresh") {
+                    Task { await model.refreshProbes() }
+                }
+            }
+
+            if !installLog.isEmpty {
+                Section("Install log") {
+                    Text(installLog)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .navigationTitle("Probe hosts")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.refreshProbes() }
+    }
+
+    private func create() {
+        busy = true
+        message = nil
+        Task {
+            do {
+                let trimmed = name.trimmingCharacters(in: .whitespaces)
+                let result = try await model.createProbe(name: trimmed)
+                newToken = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
+                name = ""
             } catch {
                 message = error.localizedDescription
             }
-        case .failure(let error):
-            message = error.localizedDescription
+            busy = false
         }
+    }
+
+    private func createAndInstall() {
+        guard let id = selectedServerId,
+              let server = model.servers.first(where: { $0.id == id }) else { return }
+        busy = true
+        message = nil
+        installLog = ""
+        Task {
+            do {
+                let result = try await model.createProbe(name: server.host.trimmingCharacters(in: .whitespaces))
+                let token = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
+                newToken = token
+                installLog = try await model.installProbe(hostId: token.id, token: token.token, on: server)
+                newToken = nil
+                message = "Probe installed on \(server.name)."
+            } catch {
+                message = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func install(_ token: NewProbeToken) {
+        guard let id = selectedServerId,
+              let server = model.servers.first(where: { $0.id == id }) else { return }
+        busy = true
+        message = nil
+        installLog = ""
+        Task {
+            do {
+                installLog = try await model.installProbe(hostId: token.id, token: token.token, on: server)
+                newToken = nil
+                message = "Probe installed on \(server.name)."
+            } catch {
+                message = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func delete(_ offsets: IndexSet) {
+        for index in offsets {
+            let host = model.probeHosts[index]
+            Task {
+                do {
+                    try await model.deleteProbe(host)
+                } catch {
+                    message = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func isOnline(_ host: ProbeHost) -> Bool {
+        guard let lastSeenAt = host.lastSeenAt else { return false }
+        return Date().timeIntervalSince(lastSeenAt) < 30
+    }
+}
+
+private struct NewProbeToken: Identifiable {
+    var id: String
+    var name: String
+    var token: String
+}
+
+private struct TerminalSettingsPage: View {
+    @Binding var draft: GlobalSettings
+
+    var body: some View {
+        Form {
+            Section("Text") {
+                Stepper("Font size: \(draft.terminal.fontSize) pt",
+                        value: $draft.terminal.fontSize, in: 8...32)
+            }
+
+            Section {
+                Picker("Color scheme", selection: $draft.terminal.colorScheme) {
+                    ForEach(TerminalColorScheme.allCases) { Text($0.label).tag($0) }
+                }
+            } footer: {
+                Text("Applies to the SSH terminal on every server, and syncs across your devices through Cloud.")
+            }
+        }
+        .navigationTitle("Terminal")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -372,19 +640,5 @@ struct SnippetEditorView: View {
                 command = snippet?.command ?? ""
             }
         }
-    }
-}
-
-/// Wraps the secret-free config JSON for `.fileExporter`.
-struct SyncDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    var data: Data
-
-    init(data: Data) { self.data = data }
-    init(configuration: ReadConfiguration) throws {
-        data = configuration.file.regularFileContents ?? Data()
-    }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
     }
 }

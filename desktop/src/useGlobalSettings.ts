@@ -1,17 +1,21 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useSettings } from './store/settings';
 import { useServers } from './store/servers';
-import { runExport } from './lib/sync';
+import { useCloud } from './store/cloud';
+import { cloudPush, registerPushDevice } from './lib/cloud';
+import { initWebPush } from './lib/push';
 
 /**
  * Applies the global settings to the main process: keeps the Bitwarden vault
  * configured, loads vault secrets into memory once the vault is unlocked, and
- * drives the periodic config auto-sync.
+ * drives cloud auto-push and FCM push registration.
  */
 export function useGlobalSettings(): void {
   const bitwarden = useSettings((s) => s.settings.bitwarden);
-  const autoSync = useSettings((s) => s.settings.autoSync);
+  const cloud = useSettings((s) => s.settings.cloud);
+  const cloudToken = useCloud((s) => s.token);
   const loadSecretsFromVault = useServers((s) => s.loadSecretsFromVault);
+  const registeredFcm = useRef<string | null>(null);
 
   // Mirror the current Bitwarden settings into the main-process vault.
   useEffect(() => {
@@ -34,13 +38,43 @@ export function useGlobalSettings(): void {
     };
   }, [bitwarden.enabled, loadSecretsFromVault]);
 
-  // Periodic auto-sync to the chosen file.
+  // Auto-push the config to the cloud (debounced) when servers/settings change.
   useEffect(() => {
-    if (!autoSync.enabled || !autoSync.filePath) return;
-    const ms = Math.max(1, autoSync.intervalMinutes) * 60_000;
-    const timer = setInterval(() => {
-      void runExport(autoSync.filePath).catch(() => undefined);
-    }, ms);
-    return () => clearInterval(timer);
-  }, [autoSync.enabled, autoSync.filePath, autoSync.intervalMinutes]);
+    if (!cloud.enabled || !cloud.autoPush) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void cloudPush().catch(() => undefined), 3000);
+    };
+    const unsubServers = useServers.subscribe((state, prev) => {
+      if (state.servers !== prev.servers) schedule();
+    });
+    const unsubSettings = useSettings.subscribe((state, prev) => {
+      if (state.settings !== prev.settings) schedule();
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubServers();
+      unsubSettings();
+    };
+  }, [cloud.enabled, cloud.autoPush]);
+
+  // Register an FCM web-push token with the worker once signed in. No-ops when
+  // push is unavailable (no Firebase config, or packaged Electron — see lib/push).
+  useEffect(() => {
+    if (!cloud.enabled || !cloudToken) return;
+    let cancelled = false;
+    void (async () => {
+      const fcm = await initWebPush();
+      if (cancelled || !fcm || registeredFcm.current === fcm) return;
+      await registerPushDevice(fcm)
+        .then(() => {
+          registeredFcm.current = fcm;
+        })
+        .catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cloud.enabled, cloudToken]);
 }

@@ -10,10 +10,14 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
   **search** box
 - Live status dashboard: CPU%, memory, swap, per-mount disk usage, network
   throughput, load average and uptime — parsed entirely from `/proc` + `df`
-- Interactive SSH terminal (xterm.js) with a full PTY shell
+- Interactive SSH terminal (xterm.js) with a full PTY shell, **multiple tabs**
+  per server (new tab with ⌘T / Ctrl+Shift+T)
 - **SFTP file manager** with a FileZilla-style layout: remote directory tree,
   detailed file listing (size / type / modified / permissions), inline text
   editor, upload / download, mkdir / rename / delete, and a transfer log
+- **Port forwarding** panel (Forwarding tab) — open SSH local tunnels
+  (`local host:port → remote host:port`) over the live connection, with a
+  labelled list of active forwards; tunnels close with the connection
 - **Global settings** (gear icon in the sidebar):
   - **Keychain (Bitwarden)** — store usernames, passwords and SSH keys in your
     Bitwarden vault so secrets sync end-to-end across devices. Reached directly
@@ -22,8 +26,12 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
     are never written to the sync file.
   - **Snippets** — reusable shell commands, runnable in any terminal from the
     snippet menu.
-  - **Auto-sync** — periodically export the server list and settings to a JSON
-    file (secrets excluded), with manual *Sync now* / *Restore* actions.
+  - **Terminal** — font size, cursor style/blink, scrollback and color scheme
+    for the SSH terminal (synced across devices via Cloud).
+  - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
+    secret-free config across devices (optionally auto-pushing on change), plus
+    a live probe-host manager. The session token stays on the device; it is
+    never written to the synced payload.
   - **AI control (MCP bridge)** — a loopback, token-protected endpoint that lets
     the [`mcp/`](../mcp) server drive your *connected* servers (run commands,
     status, SFTP). Login and secrets never leave the app; the bridge only acts
@@ -69,12 +77,14 @@ electron/                Main process (Node) — owns all SSH sockets
 src/                     React renderer
   components/ui/         shadcn/ui primitives
   store/servers.ts       zustand store (persisted server list + vault sync)
-  store/settings.ts      zustand store (keychain / snippets / auto-sync)
-  lib/sync.ts            export/import of the secret-free config file
+  store/settings.ts      zustand store (keychain / snippets / cloud)
+  store/cloud.ts         zustand store (local-only worker session token)
+  lib/sync.ts            build/apply of the secret-free config snapshot
+  lib/cloud.ts           ServerCase Worker REST client + push/pull
   useConnections.ts      connection events + 3s status polling
-  useGlobalSettings.ts   vault configuration, secret loading, auto-sync timer
+  useGlobalSettings.ts   vault configuration, secret loading, cloud auto-push
   components/            ServerList, ServerForm, Dashboard, StatusCard,
-                         Terminal, Sftp, Settings
+                         Terminal, Sftp, PortForwards, Settings
 ```
 
 Secrets, when the Bitwarden keychain is enabled, are stripped from the
@@ -83,6 +93,21 @@ fetched back into memory on unlock and on demand when connecting.
 
 Secrets never reach the renderer's network: the renderer talks only to the
 main process over IPC, and the main process holds the SSH connections.
+
+## Push notifications (FCM)
+
+Alerts from the [worker](../worker) can be delivered over FCM web push. Copy
+`.env.example` to `.env` and fill in your Firebase **web app** config plus a Web
+Push key pair (VAPID); on the worker set the matching `FCM_SERVICE_ACCOUNT`
+secret. Once signed in to Cloud, the renderer registers its token with
+`POST /v1/devices` (see `src/lib/push.ts` + `public/firebase-messaging-sw.js`).
+
+> **Caveat:** web push needs a service worker, which requires an http(s) origin.
+> That works under `npm run dev`, but a **packaged Electron app loads over
+> `file://` where service workers are unavailable**, so background push is
+> skipped there. While the window is open, live status still arrives over the
+> `/v1/stream` WebSocket. A packaged build that needs background push would have
+> to serve the renderer over a custom app protocol.
 
 ## Develop
 

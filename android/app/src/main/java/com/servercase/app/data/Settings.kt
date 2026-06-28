@@ -11,13 +11,21 @@ data class Snippet(
     val command: String,
 )
 
-/** Periodic export/import of the configuration to a JSON file. */
+/**
+ * Optional connection to a ServerCase Worker for cloud config sync. The session
+ * token is not stored here — it lives in [CloudSessionRepository] and is never
+ * written to the synced payload. Only the non-secret URL/email/preferences live
+ * in settings, so they sync across devices.
+ */
 @Serializable
-data class AutoSyncSettings(
+data class CloudSettings(
     val enabled: Boolean = false,
-    val intervalMinutes: Int = 30,
-    /** Epoch ms of the last successful sync. */
-    val lastSyncedAt: Long? = null,
+    /** Base URL of the worker, e.g. https://worker.example.com */
+    val url: String = "",
+    /** Account email — display and login convenience (not a secret). */
+    val email: String = "",
+    /** Push the config to the cloud automatically after local changes. */
+    val autoPush: Boolean = false,
 )
 
 /**
@@ -47,10 +55,33 @@ data class ServerGroup(
 )
 
 @Serializable
+enum class TerminalCursorStyle { BLOCK, UNDERLINE, BAR }
+
+/** Background/foreground hex shared with the desktop and iOS clients. */
+@Serializable
+enum class TerminalColorScheme(val backgroundHex: String, val foregroundHex: String) {
+    CHARCOAL("0b0d12", "d6dbe5"),
+    BLACK("000000", "e5e5e5"),
+    LIGHT("f5f5f5", "1c1c1c"),
+    SOLARIZED("002b36", "93a1a1"),
+}
+
+/** Appearance/behaviour of the SSH terminal, shared across servers and synced. */
+@Serializable
+data class TerminalSettings(
+    val fontSize: Int = 13,
+    val cursorBlink: Boolean = true,
+    val cursorStyle: TerminalCursorStyle = TerminalCursorStyle.BLOCK,
+    val scrollback: Int = 1000,
+    val colorScheme: TerminalColorScheme = TerminalColorScheme.CHARCOAL,
+)
+
+@Serializable
 data class GlobalSettings(
     val bitwarden: BitwardenSettings = BitwardenSettings(),
     val snippets: List<Snippet> = emptyList(),
-    val autoSync: AutoSyncSettings = AutoSyncSettings(),
+    val cloud: CloudSettings = CloudSettings(),
+    val terminal: TerminalSettings = TerminalSettings(),
     val groups: List<ServerGroup> = emptyList(),
 )
 

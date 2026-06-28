@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AuthType, ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
+import { useProbes } from '../store/probes';
 import { useSettings } from '../store/settings';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,9 +27,11 @@ export function ServerForm({ existing, onDone }: Props) {
   const addServer = useServers((s) => s.addServer);
   const updateServer = useServers((s) => s.updateServer);
   const groups = useSettings((s) => s.settings.groups);
+  const probeHosts = useProbes((s) => s.hosts);
 
   const [name, setName] = useState(existing?.name ?? '');
   const [groupId, setGroupId] = useState(existing?.groupId ?? '');
+  const [probeHostId, setProbeHostId] = useState(existing?.probeHostId ?? '');
   const [host, setHost] = useState(existing?.host ?? '');
   const [port, setPort] = useState(String(existing?.port ?? 22));
   const [username, setUsername] = useState(existing?.username ?? 'root');
@@ -50,6 +53,7 @@ export function ServerForm({ existing, onDone }: Props) {
       port: Number(port) || 22,
       username: username.trim(),
       groupId: groupId || undefined,
+      probeHostId: probeHostId || undefined,
       authType,
       password: authType === 'password' ? password : undefined,
       privateKey: authType === 'key' ? privateKey : undefined,
@@ -131,6 +135,23 @@ export function ServerForm({ existing, onDone }: Props) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="server-probe">Probe data</Label>
+              <select
+                id="server-probe"
+                value={probeHostId}
+                onChange={(e) => setProbeHostId(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="">Use SSH polling for overview</option>
+                {probeHosts.map((probe) => (
+                  <option key={probe.id} value={probe.id}>
+                    {probe.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid gap-2">

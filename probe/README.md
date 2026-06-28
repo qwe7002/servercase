@@ -30,14 +30,40 @@ cargo run -- --interval 10 --public-ip
 `--public-ip` additionally looks up the host's public addresses (needs outbound
 internet and `curl`/`wget`; cached for ~5 minutes, off by default).
 
-## Cloudflare Worker Plan
+## Release binaries
 
-The cloud side should stay thin:
+The repository includes a GitHub Actions workflow that publishes Linux binaries
+for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on `v*` tags.
+The deployment script can download those assets automatically:
 
-1. receive `servercase.probe.v1` JSON over HTTPS
-2. authenticate each probe with a per-host token
-3. store the latest snapshot and optional history
-4. expose a read API for ServerCase clients
+```sh
+curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh \
+  | bash -s -- --api https://worker.example.com --token scp_xxx
+```
+
+## Cloudflare Worker
+
+The cloud side lives in [`../worker`](../worker) and stays thin:
+
+1. receives `servercase.probe.v1` JSON over HTTPS (`POST /v1/ingest`)
+2. authenticates each probe with a per-host token (`Authorization: Bearer`)
+3. stores the latest snapshot and optional history
+4. exposes a read API for ServerCase clients
 
 That keeps SSH credentials and local management inside ServerCase while allowing
-cloud status visibility later.
+cloud status visibility.
+
+The probe stays std-only (no TLS stack), so it does not speak WebSocket itself.
+Instead its stdout JSON is piped through [`websocat`](https://github.com/vi/websocat)
+to the worker's streaming endpoint:
+
+```sh
+TOKEN=scp_...   # created in the app / via POST /v1/probes
+servercase-probe --interval 10 \
+  | websocat --ping-interval 25 -H "Authorization: Bearer $TOKEN" \
+      wss://<your-worker>/v1/ingest/ws
+```
+
+[`deploy`](deploy) automates all of this — fetching the binaries,
+registering the host and installing a `systemd` service. An HTTP fallback
+(`POST /v1/ingest` via `curl`) is also available where WebSockets are blocked.

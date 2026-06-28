@@ -8,19 +8,23 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import { connectServer } from '../lib/connect';
 import {
   ChevronDown,
   ChevronRight,
   Folders,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Server,
   Settings as SettingsIcon,
   Trash2,
+  Unplug,
 } from 'lucide-react';
 
 interface Props {
@@ -167,6 +171,17 @@ function ServerRow({
   const state = useServers((s) => s.connState[srv.id]) ?? 'disconnected';
   const select = useServers((s) => s.select);
   const removeServer = useServers((s) => s.removeServer);
+  const setConnState = useServers((s) => s.setConnState);
+
+  const disconnect = async () => {
+    await window.servercase?.disconnect(srv.id);
+    setConnState(srv.id, 'disconnected');
+  };
+
+  const reconnect = async () => {
+    await disconnect();
+    await connectServer(srv).catch(() => undefined);
+  };
 
   return (
     <ContextMenu>
@@ -195,6 +210,19 @@ function ServerRow({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem
+          onSelect={() => void reconnect()}
+          disabled={state === 'connecting'}
+        >
+          <RefreshCw /> Reconnect
+        </ContextMenuItem>
+        <ContextMenuItem
+          onSelect={() => void disconnect()}
+          disabled={state === 'disconnected'}
+        >
+          <Unplug /> Disconnect
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => onEdit(srv)}>
           <Pencil /> Edit
         </ContextMenuItem>

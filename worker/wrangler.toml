@@ -1,0 +1,55 @@
+name = "servercase-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Management panel: a React + shadcn SPA built to panel/dist and served as
+# static assets. Requests that don't match an asset fall through to the Worker
+# (so /v1/* is still handled below). Build it with `npm run build:panel`.
+[assets]
+directory = "./panel/dist"
+
+# D1 holds accounts, the per-user config snapshot, probe hosts/history and
+# registered push devices. Create it once with:
+#   wrangler d1 create servercase
+# then paste the returned database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "servercase"
+database_id = "29f91a49-f35b-4e78-967d-748b6b092f22"
+migrations_dir = "migrations"
+
+# Durable Objects (WebSocket Hibernation API, so idle connections cost nothing):
+#   ProbeSocket — one per host, receives the streaming probe ingest.
+#   UserHub     — one per user, fans live snapshots out to that user's clients.
+[[durable_objects.bindings]]
+name = "PROBE_SOCKET"
+class_name = "ProbeSocket"
+
+[[durable_objects.bindings]]
+name = "USER_HUB"
+class_name = "UserHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProbeSocket", "UserHub"]
+
+[vars]
+# Whether `POST /v1/auth/register` is open. Set to "0" to lock signups once
+# your accounts exist (you can still create accounts with wrangler/SQL).
+ALLOW_REGISTRATION = "1"
+# How many historical probe snapshots to keep per host (0 = keep only latest).
+PROBE_HISTORY_LIMIT = "240"
+# How often the streaming-ingest DO flushes buffered samples to D1, in seconds
+# (min 5). One batch write per host per interval instead of one per sample.
+PROBE_FLUSH_SECONDS = "60"
+# Push alert thresholds (percent). An alert fires when a metric crosses these.
+ALERT_CPU_PCT = "90"
+ALERT_MEM_PCT = "90"
+ALERT_DISK_PCT = "90"
+
+# Secrets — never commit; set with `wrangler secret put <NAME>` (or .dev.vars
+# for `wrangler dev`):
+#   SESSION_SECRET       signs login tokens (HMAC-SHA256). Required.
+#   FCM_SERVICE_ACCOUNT  the Firebase service-account JSON (whole file) used to
+#                        send FCM push. Optional — when unset, push is disabled.

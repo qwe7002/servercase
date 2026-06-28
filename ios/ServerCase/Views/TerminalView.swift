@@ -2,6 +2,126 @@ import GameController
 import SwiftTerm
 import SwiftUI
 
+struct TerminalTabsView: View {
+    let server: ServerConfig
+
+    @State private var tabs: [TerminalTab] = [TerminalTab(index: 1)]
+    @State private var selectedTabID: UUID?
+    @State private var nextTabIndex = 2
+
+    var body: some View {
+        VStack(spacing: 0) {
+            tabBar
+            Divider()
+            ZStack {
+                ForEach(tabs) { tab in
+                    TerminalView(server: server, isActive: tab.id == activeTabID)
+                        .opacity(tab.id == activeTabID ? 1 : 0)
+                        .allowsHitTesting(tab.id == activeTabID)
+                        .accessibilityHidden(tab.id != activeTabID)
+                }
+            }
+        }
+        .navigationTitle("Terminal")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if selectedTabID == nil {
+                selectedTabID = tabs.first?.id
+            }
+        }
+    }
+
+    private var activeTabID: UUID? {
+        if let selectedTabID, tabs.contains(where: { $0.id == selectedTabID }) {
+            return selectedTabID
+        }
+        return tabs.first?.id
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(tabs) { tab in
+                        tabButton(tab)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+
+            Button(action: addTab) {
+                Image(systemName: "plus")
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("New terminal tab")
+            .padding(.trailing, 8)
+        }
+        .background(Color(.systemBackground))
+    }
+
+    private func tabButton(_ tab: TerminalTab) -> some View {
+        let isSelected = tab.id == activeTabID
+
+        return HStack(spacing: 6) {
+            Button {
+                selectedTabID = tab.id
+            } label: {
+                Label(tab.title, systemImage: "terminal")
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+
+            if tabs.count > 1 {
+                Button {
+                    closeTab(tab)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .imageScale(.small)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close \(tab.title)")
+            }
+        }
+        .font(.caption.weight(isSelected ? .semibold : .regular))
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(isSelected ? Color(.secondarySystemBackground) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func addTab() {
+        let tab = TerminalTab(index: nextTabIndex)
+        nextTabIndex += 1
+        tabs.append(tab)
+        selectedTabID = tab.id
+    }
+
+    private func closeTab(_ tab: TerminalTab) {
+        guard tabs.count > 1,
+              let index = tabs.firstIndex(where: { $0.id == tab.id }) else {
+            return
+        }
+
+        tabs.remove(at: index)
+        if selectedTabID == tab.id {
+            let replacementIndex = min(index, tabs.count - 1)
+            selectedTabID = tabs[replacementIndex].id
+        }
+    }
+}
+
+private struct TerminalTab: Identifiable, Equatable {
+    let id = UUID()
+    let index: Int
+
+    var title: String {
+        "Terminal \(index)"
+    }
+}
+
 /// A native terminal emulator backed by SwiftTerm. SSH bytes are bridged
 /// directly into the emulator, so ANSI/VT control sequences, cursor movement,
 /// alternate screens, selection, and keyboard input are handled by SwiftTerm
@@ -10,16 +130,19 @@ struct TerminalView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let server: ServerConfig
+    /// When false (an inactive tab) the terminal gives up the keyboard.
+    var isActive: Bool = true
 
     @StateObject private var bridge = TerminalBridge()
 
     var body: some View {
+        let terminal = model.settings.terminal
         ZStack(alignment: .topTrailing) {
             if let service = model.service(server.id) {
-                SwiftTermTerminalView(service: service, bridge: bridge)
+                SwiftTermTerminalView(service: service, bridge: bridge, settings: terminal, isActive: isActive)
                     .padding(.horizontal, terminalHorizontalInset)
                     .padding(.vertical, terminalVerticalInset)
-                    .background(Color(red: 0.04, green: 0.05, blue: 0.07))
+                    .background(Color(uiColor: UIColor(hex: terminal.colorScheme.backgroundHex)))
                     .ignoresSafeArea(.keyboard, edges: .bottom)
             } else {
                 ContentUnavailableView(
@@ -116,6 +239,8 @@ private final class HardwareKeyboardMonitor {
 private struct SwiftTermTerminalView: UIViewRepresentable {
     let service: SSHService
     let bridge: TerminalBridge
+    let settings: TerminalSettings
+    let isActive: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(service: service, bridge: bridge)
@@ -124,18 +249,17 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
     func makeUIView(context: Context) -> SwiftTerm.TerminalView {
         let terminal = SwiftTerm.TerminalView(
             frame: .zero,
-            font: .monospacedSystemFont(ofSize: 13, weight: .regular)
+            font: .monospacedSystemFont(ofSize: CGFloat(settings.fontSize), weight: .regular)
         )
         terminal.terminalDelegate = context.coordinator
-        terminal.nativeBackgroundColor = UIColor(red: 0.04, green: 0.05, blue: 0.07, alpha: 1)
-        terminal.nativeForegroundColor = UIColor(red: 0.84, green: 0.86, blue: 0.9, alpha: 1)
+        applyAppearance(to: terminal)
         terminal.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         context.coordinator.attach(terminal)
         context.coordinator.startKeyboardMonitor(for: terminal)
         bridge.attach(context.coordinator)
 
-        DispatchQueue.main.async {
-            _ = terminal.becomeFirstResponder()
+        if isActive {
+            DispatchQueue.main.async { _ = terminal.becomeFirstResponder() }
         }
 
         return terminal
@@ -143,7 +267,23 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
 
     func updateUIView(_ uiView: SwiftTerm.TerminalView, context: Context) {
         context.coordinator.update(service: service, terminal: uiView)
+        applyAppearance(to: uiView)
+        // Only the active tab keeps the keyboard.
+        if isActive {
+            if !uiView.isFirstResponder {
+                DispatchQueue.main.async { _ = uiView.becomeFirstResponder() }
+            }
+        } else if uiView.isFirstResponder {
+            _ = uiView.resignFirstResponder()
+        }
         bridge.attach(context.coordinator)
+    }
+
+    /// Applies the font size and color scheme (live on settings changes).
+    private func applyAppearance(to terminal: SwiftTerm.TerminalView) {
+        terminal.font = .monospacedSystemFont(ofSize: CGFloat(settings.fontSize), weight: .regular)
+        terminal.nativeBackgroundColor = UIColor(hex: settings.colorScheme.backgroundHex)
+        terminal.nativeForegroundColor = UIColor(hex: settings.colorScheme.foregroundHex)
     }
 
     static func dismantleUIView(_ uiView: SwiftTerm.TerminalView, coordinator: Coordinator) {
@@ -311,5 +451,19 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         func clipboardCopy(source: SwiftTerm.TerminalView, content: Data) {
             UIPasteboard.general.string = String(data: content, encoding: .utf8)
         }
+    }
+}
+
+private extension UIColor {
+    /// Builds a color from a 6-digit RGB hex string (e.g. "0b0d12").
+    convenience init(hex: String) {
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self.init(
+            red: CGFloat((value >> 16) & 0xff) / 255,
+            green: CGFloat((value >> 8) & 0xff) / 255,
+            blue: CGFloat(value & 0xff) / 255,
+            alpha: 1
+        )
     }
 }

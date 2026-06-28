@@ -97,6 +97,34 @@ class SshClient(private val config: ServerConfig) {
         return handle to flow
     }
 
+    /**
+     * Like [openShell] but emits the shell's raw output bytes, for driving a
+     * real terminal emulator (which must see control/UTF-8 bytes intact).
+     */
+    fun openShellBytes(cols: Int, rows: Int): Pair<ShellHandle, Flow<ByteArray>> {
+        val client = ssh ?: error("not connected")
+        val session = client.startSession()
+        session.allocatePTY("xterm-256color", cols, rows, 0, 0, emptyMap())
+        val shell = session.startShell()
+        val handle = ShellHandle(session, shell.outputStream)
+
+        val flow = callbackFlow {
+            val buf = ByteArray(8192)
+            val input = shell.inputStream
+            try {
+                while (isActive) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    trySend(buf.copyOf(n))
+                }
+            } finally {
+                close()
+            }
+            awaitClose { runCatching { session.close() } }
+        }.flowOn(Dispatchers.IO)
+        return handle to flow
+    }
+
     fun disconnect() {
         runCatching { ssh?.disconnect() }
         ssh = null
@@ -108,6 +136,12 @@ class SshClient(private val config: ServerConfig) {
     ) {
         fun write(data: String) {
             stdin.write(data.toByteArray(StandardCharsets.UTF_8))
+            stdin.flush()
+        }
+
+        /** Sends raw bytes (e.g. terminal-emulator keyboard output) to the shell. */
+        fun write(data: ByteArray) {
+            stdin.write(data)
             stdin.flush()
         }
 
