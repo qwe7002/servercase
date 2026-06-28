@@ -419,7 +419,7 @@ private struct ProbeHostsPage: View {
             }
 
             if let newToken {
-                Section("Probe token for \(newToken.name)") {
+                Section {
                     Text(newToken.token)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
@@ -437,6 +437,8 @@ private struct ProbeHostsPage: View {
                         install(newToken)
                     }
                     .disabled(busy || selectedServerId == nil)
+                } header: {
+                    Text("Probe token for \(newToken.name)")
                 } footer: {
                     Text("The token is shown only once. Installation uses the selected server's SSH connection and installs a user-level probe service.")
                 }

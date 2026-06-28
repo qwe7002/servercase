@@ -2,13 +2,19 @@ import { useEffect, useState } from 'react';
 import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
 import { useProbes } from '../store/probes';
+import { useSettings } from '../store/settings';
+import { useCloud, hasValidSession } from '../store/cloud';
 import { formatKb, formatUptime, percent } from '../format';
 import { statusFromProbe } from '../lib/probeStatus';
 import { Gauge, UsageBar } from './StatusCard';
 import { TerminalTabs } from './TerminalTabs';
 import { Sftp } from './Sftp';
 import { connectServer } from '../lib/connect';
+import { cloudApi, CloudError } from '../lib/cloud';
+import { buildProbeInstallCommand } from '../lib/probeInstall';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Card,
   CardContent,
@@ -16,7 +22,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertCircle, ServerIcon, Timer } from 'lucide-react';
+import { AlertCircle, Loader2, RadioTower, ServerIcon, Timer } from 'lucide-react';
 
 interface Props {
   server: ServerConfig;
@@ -30,12 +36,24 @@ export function Dashboard({ server }: Props) {
   const probeHost = useProbes((s) =>
     server.probeHostId ? s.hosts.find((host) => host.id === server.probeHostId) : undefined,
   );
+  const setProbeHosts = useProbes((s) => s.setHosts);
   const probeStatus = probeHost?.snapshot
     ? statusFromProbe(probeHost.snapshot)
     : undefined;
   const status = probeStatus ?? sshStatus;
   const lastError = useServers((s) => s.lastError[server.id]);
+  const updateServer = useServers((s) => s.updateServer);
+  const cloudUrl = useSettings((s) => s.settings.cloud.url);
+  const cloudToken = useCloud((s) => s.token);
+  const cloudExpiresAt = useCloud((s) => s.expiresAt);
   const [tab, setTab] = useState<Tab>('overview');
+  const [installingProbe, setInstallingProbe] = useState(false);
+  const [installMessage, setInstallMessage] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [manualToken, setManualToken] = useState<{
+    name: string;
+    token: string;
+  } | null>(null);
 
   useEffect(() => {
     const current = useServers.getState().connState[server.id] ?? 'disconnected';
@@ -47,6 +65,44 @@ export function Dashboard({ server }: Props) {
   const connected = connState === 'connected';
   const usesProbe = !!server.probeHostId;
   const probeWaiting = usesProbe && !probeStatus;
+  const canInstallProbe =
+    !!cloudUrl &&
+    hasValidSession({ token: cloudToken, expiresAt: cloudExpiresAt }) &&
+    !!cloudToken &&
+    !installingProbe;
+
+  const installProbe = async () => {
+    const api = window.servercase;
+    if (!api || !cloudToken || !cloudUrl) return;
+    setInstallingProbe(true);
+    setInstallError(null);
+    setInstallMessage(null);
+    try {
+      const created = await cloudApi.createProbe(cloudUrl, cloudToken, server.name);
+      setManualToken({ name: created.host.name, token: created.token });
+      const current = useServers.getState().connState[server.id] ?? 'disconnected';
+      if (current !== 'connected') {
+        await connectServer(server);
+      }
+      const result = await api.runCommand(
+        server.id,
+        buildProbeInstallCommand(cloudUrl, created.token),
+      );
+      const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
+      if (result.code && result.code !== 0) {
+        throw new Error(output || `Install exited with code ${result.code}`);
+      }
+      updateServer({ ...server, probeHostId: created.host.id });
+      const probes = await cloudApi.listProbes(cloudUrl, cloudToken);
+      setProbeHosts(probes.hosts);
+      setManualToken(null);
+      setInstallMessage(output || 'Probe installed.');
+    } catch (e) {
+      setInstallError(e instanceof CloudError ? e.message : (e as Error).message);
+    } finally {
+      setInstallingProbe(false);
+    }
+  };
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -69,6 +125,25 @@ export function Dashboard({ server }: Props) {
               <TabsTrigger value="files">Files</TabsTrigger>
             </TabsList>
           </Tabs>
+          {!usesProbe && (
+            <Button
+              variant="outline"
+              onClick={() => void installProbe()}
+              disabled={!canInstallProbe}
+              title={
+                canInstallProbe
+                  ? 'Install probe on this server'
+                  : 'Sign in to ServerCase Cloud first'
+              }
+            >
+              {installingProbe ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <RadioTower />
+              )}
+              {installingProbe ? 'Installing…' : 'Install probe'}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -116,6 +191,65 @@ export function Dashboard({ server }: Props) {
         <Placeholder>Collecting status…</Placeholder>
       ) : (
         <div className="grid flex-1 grid-cols-2 gap-4 overflow-y-auto p-6">
+          {!usesProbe && (
+            <Alert className="col-span-2">
+              <RadioTower />
+              <AlertTitle>Probe not installed</AlertTitle>
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                <span>
+                  Install a lightweight probe on this server to keep Overview
+                  updated without SSH polling.
+                </span>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {installError && (
+            <Alert variant="destructive" className="col-span-2">
+              <AlertCircle />
+              <AlertTitle>Probe install failed</AlertTitle>
+              <AlertDescription className="grid gap-2">
+                <span>{installError}</span>
+                {manualToken && (
+                  <>
+                    <span className="text-xs">
+                      A probe host was created for {manualToken.name}. Copy this
+                      one-time token if you want to deploy it manually.
+                    </span>
+                    <div className="flex gap-2">
+                      <Input
+                        readOnly
+                        value={manualToken.token}
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          void navigator.clipboard?.writeText(manualToken.token)
+                        }
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {installMessage && (
+            <Alert className="col-span-2">
+              <RadioTower />
+              <AlertTitle>Probe installed</AlertTitle>
+              <AlertDescription>
+                <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-xs">
+                  {installMessage}
+                </pre>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <section className="col-span-2 flex flex-wrap gap-4">
             <Gauge
               label="CPU"

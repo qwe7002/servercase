@@ -8,10 +8,7 @@ import { Activity, Copy, Plus, RadioTower, Server, Trash2 } from 'lucide-react';
 import { useSettings } from '../store/settings';
 import { useCloud } from '../store/cloud';
 import { useProbes, type ProbeHostView } from '../store/probes';
-import { useServers } from '../store/servers';
 import { cloudApi, CloudError } from '../lib/cloud';
-import { connectServer } from '../lib/connect';
-import { buildProbeInstallCommand } from '../lib/probeInstall';
 import type { StreamStatus } from '../lib/cloudStream';
 import { formatKb, formatUptime, percent } from '../format';
 
@@ -33,16 +30,10 @@ export function CloudProbes() {
   const status = useProbes((s) => s.streamStatus);
   const setHosts = useProbes((s) => s.setHosts);
   const removeProbeHost = useProbes((s) => s.removeHost);
-  const servers = useServers((s) => s.servers);
-  const selectedId = useServers((s) => s.selectedId);
-  const connState = useServers((s) => s.connState);
-  const updateServer = useServers((s) => s.updateServer);
 
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [installing, setInstalling] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [installLog, setInstallLog] = useState<string | null>(null);
   const [newToken, setNewToken] = useState<{
     id: string;
     name: string;
@@ -87,73 +78,6 @@ export function CloudProbes() {
     }
   };
 
-  const selectedServer = servers.find((server) => server.id === selectedId);
-
-  const restoreSelectedConnection = async (
-    server: typeof selectedServer,
-    wasConnected: boolean,
-  ) => {
-    if (!server || !wasConnected) return;
-    const current = useServers.getState().connState[server.id] ?? 'disconnected';
-    if (current === 'disconnected') {
-      await connectServer(server).catch(() => undefined);
-    }
-  };
-
-  const installProbeOnSelected = async (probe: { id: string; name: string; token: string }) => {
-    const api = window.servercase;
-    if (!api || !selectedServer || !url) return;
-    const wasConnected = connState[selectedServer.id] === 'connected';
-    setInstalling(true);
-    setErr(null);
-    setInstallLog(null);
-    try {
-      if (connState[selectedServer.id] !== 'connected') {
-        await connectServer(selectedServer);
-      }
-      const command = buildProbeInstallCommand(url, probe.token);
-      const result = await api.runCommand(selectedServer.id, command);
-      const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
-      setInstallLog(output || 'Install command completed.');
-      if (result.code && result.code !== 0) {
-        throw new Error(`Install exited with code ${result.code}`);
-      }
-      updateServer({ ...selectedServer, probeHostId: probe.id });
-      setNewToken(null);
-      await refresh();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      await restoreSelectedConnection(selectedServer, wasConnected);
-      setInstalling(false);
-    }
-  };
-
-  const installOnSelected = async () => {
-    if (!newToken) return;
-    await installProbeOnSelected(newToken);
-  };
-
-  const addAndInstall = async () => {
-    if (!token || !name.trim() || !selectedServer) return;
-    const wasConnected = connState[selectedServer.id] === 'connected';
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await cloudApi.createProbe(url, token, name.trim());
-      const probe = { id: res.host.id, name: res.host.name, token: res.token };
-      setNewToken(probe);
-      setName('');
-      await refresh();
-      await installProbeOnSelected(probe);
-    } catch (e) {
-      setErr(e instanceof CloudError ? e.message : (e as Error).message);
-    } finally {
-      await restoreSelectedConnection(selectedServer, wasConnected);
-      setBusy(false);
-    }
-  };
-
   const removeHost = async (id: string) => {
     if (!token) return;
     setBusy(true);
@@ -182,25 +106,18 @@ export function CloudProbes() {
           onKeyDown={(e) => e.key === 'Enter' && void addHost()}
         />
         <Button onClick={() => void addHost()} disabled={busy || !name.trim()}>
-          <Plus /> Add host
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => void addAndInstall()}
-          disabled={busy || installing || !name.trim() || !selectedServer}
-          title={selectedServer ? `Install on ${selectedServer.name}` : 'Select a server first'}
-        >
-          <RadioTower /> Add & install
+          <Plus /> Create token
         </Button>
       </div>
 
       {newToken && (
         <Alert>
           <RadioTower className="size-4" />
-          <AlertTitle>Probe token for “{newToken.name}”</AlertTitle>
+          <AlertTitle>Manual probe token for “{newToken.name}”</AlertTitle>
           <AlertDescription className="grid gap-2">
             <p className="text-xs text-muted-foreground">
-              Copy it now — it is shown only once. Deploy with it using{' '}
+              Copy it now — it is shown only once. For automatic installation,
+              open a server Overview and use Install probe. Manual deploy uses{' '}
               <code>probe/deploy/install.sh --token …</code>.
             </p>
             <div className="flex gap-2">
@@ -214,17 +131,6 @@ export function CloudProbes() {
               </Button>
             </div>
             <div>
-              <Button
-                size="sm"
-                onClick={() => void installOnSelected()}
-                disabled={installing || !selectedServer}
-              >
-                {installing
-                  ? 'Installing…'
-                  : selectedServer
-                    ? `Install on ${selectedServer.name}`
-                    : 'Select a server first'}
-              </Button>
               <Button variant="ghost" size="sm" onClick={() => setNewToken(null)}>
                 Done
               </Button>
@@ -233,15 +139,10 @@ export function CloudProbes() {
         </Alert>
       )}
 
-      {installLog && (
-        <pre className="max-h-36 overflow-auto rounded border bg-muted/30 p-2 text-xs">
-          {installLog}
-        </pre>
-      )}
-
       {hosts.length === 0 ? (
         <p className="px-1 py-2 text-sm text-muted-foreground">
-          No probe hosts yet. Add one, then deploy the agent with its token.
+          No probe hosts yet. Install one from a server Overview, or create a
+          manual token here.
         </p>
       ) : (
         <div className="grid gap-2">
