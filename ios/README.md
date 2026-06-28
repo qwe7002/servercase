@@ -10,7 +10,7 @@ over SwiftNIO).
 - Live status dashboard: CPU%, memory, swap, per-mount disks, network
   throughput, load average and uptime — parsed from `/proc` + `df`
 - Interactive SwiftTerm PTY terminal over the live SSH connection, with a
-  snippet menu
+  snippet menu and **multiple tabs** per server
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download) over the live connection
 - **Adaptive layout** — a single navigation stack on iPhone and a

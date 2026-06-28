@@ -8,7 +8,8 @@ Jetpack Compose, Material 3 and SSHJ.
 - Add / edit / delete servers (password or private-key auth)
 - Live status dashboard: CPU%, memory, swap, per-mount disks, network
   throughput, load average and uptime — parsed from `/proc` + `df`
-- Interactive SSH shell (line-oriented terminal) with a snippet menu
+- Interactive SSH shell (line-oriented terminal) with a snippet menu and
+  **multiple tabs** per server
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download via SAF) over the live connection
 - **Global settings** (gear in the server list):
