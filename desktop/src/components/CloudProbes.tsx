@@ -89,9 +89,21 @@ export function CloudProbes() {
 
   const selectedServer = servers.find((server) => server.id === selectedId);
 
-  const installOnSelected = async () => {
+  const restoreSelectedConnection = async (
+    server: typeof selectedServer,
+    wasConnected: boolean,
+  ) => {
+    if (!server || !wasConnected) return;
+    const current = useServers.getState().connState[server.id] ?? 'disconnected';
+    if (current === 'disconnected') {
+      await connectServer(server).catch(() => undefined);
+    }
+  };
+
+  const installProbeOnSelected = async (probe: { id: string; name: string; token: string }) => {
     const api = window.servercase;
-    if (!api || !newToken || !selectedServer || !url) return;
+    if (!api || !selectedServer || !url) return;
+    const wasConnected = connState[selectedServer.id] === 'connected';
     setInstalling(true);
     setErr(null);
     setInstallLog(null);
@@ -99,20 +111,46 @@ export function CloudProbes() {
       if (connState[selectedServer.id] !== 'connected') {
         await connectServer(selectedServer);
       }
-      const command = buildProbeInstallCommand(url, newToken.token);
+      const command = buildProbeInstallCommand(url, probe.token);
       const result = await api.runCommand(selectedServer.id, command);
       const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n');
       setInstallLog(output || 'Install command completed.');
       if (result.code && result.code !== 0) {
         throw new Error(`Install exited with code ${result.code}`);
       }
-      updateServer({ ...selectedServer, probeHostId: newToken.id });
+      updateServer({ ...selectedServer, probeHostId: probe.id });
       setNewToken(null);
       await refresh();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
+      await restoreSelectedConnection(selectedServer, wasConnected);
       setInstalling(false);
+    }
+  };
+
+  const installOnSelected = async () => {
+    if (!newToken) return;
+    await installProbeOnSelected(newToken);
+  };
+
+  const addAndInstall = async () => {
+    if (!token || !name.trim() || !selectedServer) return;
+    const wasConnected = connState[selectedServer.id] === 'connected';
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await cloudApi.createProbe(url, token, name.trim());
+      const probe = { id: res.host.id, name: res.host.name, token: res.token };
+      setNewToken(probe);
+      setName('');
+      await refresh();
+      await installProbeOnSelected(probe);
+    } catch (e) {
+      setErr(e instanceof CloudError ? e.message : (e as Error).message);
+    } finally {
+      await restoreSelectedConnection(selectedServer, wasConnected);
+      setBusy(false);
     }
   };
 
@@ -145,6 +183,14 @@ export function CloudProbes() {
         />
         <Button onClick={() => void addHost()} disabled={busy || !name.trim()}>
           <Plus /> Add host
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => void addAndInstall()}
+          disabled={busy || installing || !name.trim() || !selectedServer}
+          title={selectedServer ? `Install on ${selectedServer.name}` : 'Select a server first'}
+        >
+          <RadioTower /> Add & install
         </Button>
       </div>
 

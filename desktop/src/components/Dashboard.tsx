@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
 import { useProbes } from '../store/probes';
@@ -9,7 +9,6 @@ import { TerminalTabs } from './TerminalTabs';
 import { Sftp } from './Sftp';
 import { connectServer } from '../lib/connect';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -36,27 +35,14 @@ export function Dashboard({ server }: Props) {
     : undefined;
   const status = probeStatus ?? sshStatus;
   const lastError = useServers((s) => s.lastError[server.id]);
-  const setConnState = useServers((s) => s.setConnState);
   const [tab, setTab] = useState<Tab>('overview');
-  const [busy, setBusy] = useState(false);
 
-  const connect = async () => {
-    setBusy(true);
-    try {
-      await connectServer(server);
-    } catch {
-      // Error state is already set by connectServer.
-    } finally {
-      setBusy(false);
+  useEffect(() => {
+    const current = useServers.getState().connState[server.id] ?? 'disconnected';
+    if (current === 'disconnected') {
+      void connectServer(server).catch(() => undefined);
     }
-  };
-
-  const disconnect = async () => {
-    const api = window.servercase;
-    if (!api) return;
-    await api.disconnect(server.id);
-    setConnState(server.id, 'disconnected');
-  };
+  }, [server]);
 
   const connected = connState === 'connected';
   const usesProbe = !!server.probeHostId;
@@ -83,15 +69,6 @@ export function Dashboard({ server }: Props) {
               <TabsTrigger value="files">Files</TabsTrigger>
             </TabsList>
           </Tabs>
-          {connected ? (
-            <Button variant="outline" onClick={disconnect}>
-              Disconnect
-            </Button>
-          ) : (
-            <Button onClick={connect} disabled={busy}>
-              {connState === 'connecting' ? 'Connecting…' : 'Connect'}
-            </Button>
-          )}
         </div>
       </header>
 
@@ -107,13 +84,21 @@ export function Dashboard({ server }: Props) {
         connected ? (
           <TerminalTabs serverId={server.id} />
         ) : (
-          <Placeholder>Connect to open a terminal.</Placeholder>
+          <Placeholder>
+            {connState === 'connecting'
+              ? 'Establishing SSH connection…'
+              : 'SSH connection is offline. Use Reconnect from the server list menu.'}
+          </Placeholder>
         )
       ) : tab === 'files' ? (
         connected ? (
           <Sftp serverId={server.id} />
         ) : (
-          <Placeholder>Connect to browse files over SFTP.</Placeholder>
+          <Placeholder>
+            {connState === 'connecting'
+              ? 'Establishing SSH connection…'
+              : 'SSH connection is offline. Use Reconnect from the server list menu.'}
+          </Placeholder>
         )
       ) : probeWaiting ? (
         <Placeholder>
@@ -125,7 +110,7 @@ export function Dashboard({ server }: Props) {
         <Placeholder>
           {connState === 'connecting'
             ? 'Establishing SSH connection…'
-            : 'Not connected. Press Connect to view live status.'}
+            : 'SSH connection is offline. Use Reconnect from the server list menu.'}
         </Placeholder>
       ) : !status ? (
         <Placeholder>Collecting status…</Placeholder>
