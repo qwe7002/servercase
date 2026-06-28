@@ -5,18 +5,19 @@
 # Installs the servercase-probe agent on a Linux host and wires it to stream
 # servercase.probe.v1 snapshots to the ServerCase Worker over a WebSocket
 # (probe stdout → websocat → wss://.../v1/ingest/ws). Runs as a hardened
-# systemd service that reconnects automatically.
+# systemd service that reconnects automatically. Non-root installs use a
+# per-user systemd service; root installs use a system-wide service.
 #
 # The probe stays a zero-dependency std-only Rust binary; websocat (a single
 # static binary) provides the TLS WebSocket client, so nothing has to be built
 # on the host.
 #
 # Usage (already have a probe token):
-#   sudo ./install.sh --api https://worker.example.com --token scp_xxx
+#   ./install.sh --api https://worker.example.com --token scp_xxx
 #
 # Usage (auto-register this host with your account):
-#   sudo ./install.sh --api https://worker.example.com \
-#                     --session <your login token> --name "$(hostname)"
+#   ./install.sh --api https://worker.example.com \
+#                --session <your login token> --name "$(hostname)"
 #
 # Run `./install.sh --help` for all flags. Re-running upgrades in place.
 set -euo pipefail
@@ -31,14 +32,15 @@ INTERVAL=10
 PUBLIC_IP=""        # set to "--public-ip" to enable public-IP lookup
 PROBE_URL=""        # download URL for the servercase-probe binary
 PROBE_PATH=""       # path to a prebuilt servercase-probe binary
-BUILD_DIR=""        # cargo source dir to build from (defaults to repo ../probe)
+BUILD_DIR=""        # cargo source dir to build from (defaults to repo probe/)
 GITHUB_REPO="${SERVERCASE_GITHUB_REPO:-qwe7002/servercase}"
 GITHUB_TAG="${SERVERCASE_PROBE_VERSION:-latest}"
 WEBSOCAT_URL=""     # override websocat download URL
 WEBSOCAT_VERSION="1.13.0"
-PREFIX="/opt/servercase-probe"
-CONF_DIR="/etc/servercase-probe"
+PREFIX=""
+CONF_DIR=""
 SERVICE_USER="servercase"
+INSTALL_MODE="auto"  # auto | system | user
 UNINSTALL=0
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" >/dev/null 2>&1 && pwd)"
@@ -69,6 +71,9 @@ while [ $# -gt 0 ]; do
     --probe-version)    GITHUB_TAG="$2"; shift 2;;
     --websocat-url)     WEBSOCAT_URL="$2"; shift 2;;
     --prefix)           PREFIX="$2"; shift 2;;
+    --conf-dir)         CONF_DIR="$2"; shift 2;;
+    --system)           INSTALL_MODE="system"; shift;;
+    --user-service)     INSTALL_MODE="user"; shift;;
     --user)             SERVICE_USER="$2"; shift 2;;
     --uninstall)        UNINSTALL=1; shift;;
     -h|--help)          usage;;
@@ -76,19 +81,49 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ "$(id -u)" -eq 0 ] || die "must run as root (use sudo)"
-
 SERVICE_NAME="servercase-probe"
-UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+
+if [ "$INSTALL_MODE" = "auto" ]; then
+  if [ "$(id -u)" -eq 0 ]; then INSTALL_MODE="system"; else INSTALL_MODE="user"; fi
+fi
+
+case "$INSTALL_MODE" in
+  system)
+    [ "$(id -u)" -eq 0 ] || die "--system install must run as root"
+    PREFIX="${PREFIX:-/opt/servercase-probe}"
+    CONF_DIR="${CONF_DIR:-/etc/servercase-probe}"
+    UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+    ;;
+  user)
+    [ "$(id -u)" -ne 0 ] || die "--user-service should not run as root"
+    PREFIX="${PREFIX:-$HOME/.local/lib/servercase-probe}"
+    CONF_DIR="${CONF_DIR:-$HOME/.config/servercase-probe}"
+    UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    UNIT_PATH="${UNIT_DIR}/${SERVICE_NAME}.service"
+    ;;
+  *) die "unknown install mode: $INSTALL_MODE";;
+esac
+
+systemctl_cmd() {
+  if [ "$INSTALL_MODE" = "system" ]; then
+    systemctl "$@"
+  else
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" systemctl --user "$@"
+  fi
+}
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
 if [ "$UNINSTALL" -eq 1 ]; then
   log "Stopping and removing ${SERVICE_NAME}"
-  systemctl disable --now "$SERVICE_NAME" 2>/dev/null || true
+  systemctl_cmd disable --now "$SERVICE_NAME" 2>/dev/null || true
   rm -f "$UNIT_PATH"
-  systemctl daemon-reload
+  systemctl_cmd daemon-reload
   rm -rf "$PREFIX" "$CONF_DIR"
-  log "Removed. (The user '${SERVICE_USER}' was left in place.)"
+  if [ "$INSTALL_MODE" = "system" ]; then
+    log "Removed. (The user '${SERVICE_USER}' was left in place.)"
+  else
+    log "Removed."
+  fi
   exit 0
 fi
 
@@ -155,7 +190,7 @@ elif [ -n "$PROBE_URL" ]; then
   chmod 0755 "$PREFIX/servercase-probe"
 else
   # Build from the repo's probe/ crate if we're running inside a checkout.
-  SRC="${BUILD_DIR:-$SCRIPT_DIR/../probe}"
+  SRC="${BUILD_DIR:-$SCRIPT_DIR/..}"
   if [ -f "$SRC/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
     log "Building probe from $SRC (cargo)"
     ( cd "$SRC" && cargo build --release )
@@ -180,7 +215,7 @@ else
 fi
 
 # ── Service user ─────────────────────────────────────────────────────────────
-if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+if [ "$INSTALL_MODE" = "system" ] && ! id "$SERVICE_USER" >/dev/null 2>&1; then
   log "Creating system user '${SERVICE_USER}'"
   useradd --system --no-create-home --shell /usr/sbin/nologin "$SERVICE_USER" 2>/dev/null \
     || useradd --system --no-create-home --shell /bin/false "$SERVICE_USER"
@@ -191,7 +226,7 @@ install -d -m 0750 "$CONF_DIR"
 ENV_FILE="$CONF_DIR/probe.env"
 umask 077
 cat > "$ENV_FILE" <<EOF
-# Generated by deploy/install.sh — contains the probe token; keep private.
+# Generated by probe/deploy/install.sh — contains the probe token; keep private.
 PROBE_BIN=$PREFIX/servercase-probe
 WEBSOCAT_BIN=$WS_BIN
 WS_URL=$WS_URL
@@ -199,15 +234,19 @@ TOKEN=$TOKEN
 INTERVAL=$INTERVAL
 PUBLIC_IP=$PUBLIC_IP
 EOF
-chown -R "$SERVICE_USER":"$SERVICE_USER" "$CONF_DIR"
+if [ "$INSTALL_MODE" = "system" ]; then
+  chown -R "$SERVICE_USER":"$SERVICE_USER" "$CONF_DIR"
+fi
 chmod 0600 "$ENV_FILE"
 
 # ── systemd unit ─────────────────────────────────────────────────────────────
 # Note: `$$VAR` passes a literal `$VAR` through systemd to /bin/sh, which then
 # expands it from EnvironmentFile — so the token is never rendered into systemd
 # state by variable substitution.
-log "Installing systemd unit"
-cat > "$UNIT_PATH" <<EOF
+log "Installing ${INSTALL_MODE} systemd unit"
+if [ "$INSTALL_MODE" = "user" ]; then install -d -m 0755 "$UNIT_DIR"; fi
+{
+  cat <<EOF
 [Unit]
 Description=ServerCase probe -> cloud (WebSocket)
 After=network-online.target
@@ -215,24 +254,45 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
+EOF
+  if [ "$INSTALL_MODE" = "system" ]; then
+    printf 'User=%s\n' "$SERVICE_USER"
+  fi
+  cat <<EOF
 EnvironmentFile=$ENV_FILE
 ExecStart=/bin/sh -c '"\$\$PROBE_BIN" --interval "\$\$INTERVAL" \$\$PUBLIC_IP | "\$\$WEBSOCAT_BIN" --ping-interval 25 --ping-timeout 60 -H "Authorization: Bearer \$\$TOKEN" "\$\$WS_URL"'
 Restart=always
 RestartSec=5
 # Hardening — the probe only needs to read /proc and run df/ip/curl.
 NoNewPrivileges=true
+PrivateTmp=true
+EOF
+  if [ "$INSTALL_MODE" = "system" ]; then
+    cat <<EOF
 ProtectSystem=strict
 ProtectHome=true
-PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
 EOF
+  else
+    cat <<EOF
 
-systemctl daemon-reload
-systemctl enable --now "$SERVICE_NAME"
+[Install]
+WantedBy=default.target
+EOF
+  fi
+} > "$UNIT_PATH"
+
+systemctl_cmd daemon-reload
+systemctl_cmd enable --now "$SERVICE_NAME"
 
 log "Done. Streaming to ${WS_URL}"
-log "  systemctl status ${SERVICE_NAME}"
-log "  journalctl -u ${SERVICE_NAME} -f"
+if [ "$INSTALL_MODE" = "system" ]; then
+  log "  systemctl status ${SERVICE_NAME}"
+  log "  journalctl -u ${SERVICE_NAME} -f"
+else
+  log "  systemctl --user status ${SERVICE_NAME}"
+  log "  journalctl --user -u ${SERVICE_NAME} -f"
+  warn "User services may stop after logout unless linger is enabled by an admin."
+fi

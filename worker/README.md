@@ -161,7 +161,7 @@ every sample. Live fan-out and alert evaluation still happen on every frame, so
 the panel and push stay instant. The HTTP `POST /v1/ingest` fallback writes per
 request.
 
-Don't hand-roll a client: deploy the agent with [`deploy/install.sh`](../deploy),
+Don't hand-roll a client: deploy the agent with [`probe/deploy/install.sh`](../probe/deploy),
 which streams the probe's stdout through `websocat`:
 
 ```sh

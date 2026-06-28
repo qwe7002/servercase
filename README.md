@@ -12,7 +12,7 @@ standalone, idiomatic implementation for its platform that shares the
 | MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
 | Probe agent | Rust | local Linux `/proc` | [`probe/`](probe) |
 | Cloud worker | Cloudflare Workers + TypeScript + D1 | — | [`worker/`](worker) |
-| Probe deploy | `systemd` + `websocat` installer | — | [`deploy/`](deploy) |
+| Probe deploy | `systemd` + `websocat` installer | — | [`probe/deploy/`](probe/deploy) |
 
 The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
 server that lets an AI assistant manage your servers (run command, status,
@@ -38,10 +38,10 @@ tokens, devices). Secrets stay in ServerCase: the worker stores only secret-free
 server definitions, and the Bitwarden API key is redacted before upload. See its
 [README](worker/README.md).
 
-The [`deploy/`](deploy) package automates putting a probe on a host: a single
+The [`probe/deploy/`](probe/deploy) package automates putting a probe on a host: a single
 `install.sh` fetches the agent and `websocat`, optionally registers the host to
 mint its token, and installs a hardened `systemd` service that streams to the
-worker over WebSocket and reconnects on drop. See its [README](deploy/README.md).
+worker over WebSocket and reconnects on drop. See its [README](probe/deploy/README.md).
 
 ## Shared design
 

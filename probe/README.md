@@ -37,8 +37,8 @@ for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on `v*` tags.
 The deployment script can download those assets automatically:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/main/deploy/install.sh \
-  | sudo bash -s -- --api https://worker.example.com --token scp_xxx
+curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh \
+  | bash -s -- --api https://worker.example.com --token scp_xxx
 ```
 
 ## Cloudflare Worker
@@ -64,6 +64,6 @@ servercase-probe --interval 10 \
       wss://<your-worker>/v1/ingest/ws
 ```
 
-[`../deploy`](../deploy) automates all of this — fetching the binaries,
+[`deploy`](deploy) automates all of this — fetching the binaries,
 registering the host and installing a `systemd` service. An HTTP fallback
 (`POST /v1/ingest` via `curl`) is also available where WebSockets are blocked.

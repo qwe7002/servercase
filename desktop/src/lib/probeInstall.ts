@@ -1,5 +1,5 @@
 const INSTALL_SCRIPT_URL =
-  'https://raw.githubusercontent.com/qwe7002/servercase/main/deploy/install.sh';
+  'https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -15,9 +15,7 @@ export function buildProbeInstallCommand(apiUrl: string, token: string): string 
       INSTALL_SCRIPT_URL,
     )}; else echo "need curl or wget"; exit 1; fi`,
     'chmod 700 "$tmp"',
-    'SUDO="sudo -n"',
-    '[ "$(id -u)" -eq 0 ] && SUDO=',
-    `$SUDO bash "$tmp" --api ${shellQuote(apiUrl)} --token ${shellQuote(
+    `bash "$tmp" --user-service --api ${shellQuote(apiUrl)} --token ${shellQuote(
       token,
     )} --interval 10 --public-ip`,
     'rm -f "$tmp"',

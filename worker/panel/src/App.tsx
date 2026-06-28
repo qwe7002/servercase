@@ -284,7 +284,7 @@ function ProbesTab() {
           <AlertTitle>Probe token for “{newToken.name}”</AlertTitle>
           <AlertDescription className="grid gap-2">
             <p className="text-xs text-muted-foreground">
-              Copy it now — shown once. Deploy with <code>deploy/install.sh --token …</code>.
+              Copy it now — shown once. Deploy with <code>probe/deploy/install.sh --token …</code>.
             </p>
             <div className="flex gap-2">
               <Input readOnly value={newToken.token} className="font-mono text-xs" />

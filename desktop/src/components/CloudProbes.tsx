@@ -155,7 +155,7 @@ export function CloudProbes() {
           <AlertDescription className="grid gap-2">
             <p className="text-xs text-muted-foreground">
               Copy it now — it is shown only once. Deploy with it using{' '}
-              <code>deploy/install.sh --token …</code>.
+              <code>probe/deploy/install.sh --token …</code>.
             </p>
             <div className="flex gap-2">
               <Input readOnly value={newToken.token} className="font-mono text-xs" />
