@@ -10,7 +10,8 @@ React, TypeScript, Vite, Tailwind CSS and shadcn/ui.
   **search** box
 - Live status dashboard: CPU%, memory, swap, per-mount disk usage, network
   throughput, load average and uptime — parsed entirely from `/proc` + `df`
-- Interactive SSH terminal (xterm.js) with a full PTY shell
+- Interactive SSH terminal (xterm.js) with a full PTY shell, **multiple tabs**
+  per server (new tab with ⌘T / Ctrl+Shift+T)
 - **SFTP file manager** with a FileZilla-style layout: remote directory tree,
   detailed file listing (size / type / modified / permissions), inline text
   editor, upload / download, mkdir / rename / delete, and a transfer log

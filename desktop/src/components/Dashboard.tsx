@@ -3,7 +3,7 @@ import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
 import { formatKb, formatUptime, percent } from '../format';
 import { Gauge, UsageBar } from './StatusCard';
-import { Terminal } from './Terminal';
+import { TerminalTabs } from './TerminalTabs';
 import { Sftp } from './Sftp';
 import { connectServer } from '../lib/connect';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -93,7 +93,7 @@ export function Dashboard({ server }: Props) {
 
       {tab === 'terminal' ? (
         connected ? (
-          <Terminal serverId={server.id} />
+          <TerminalTabs serverId={server.id} />
         ) : (
           <Placeholder>Connect to open a terminal.</Placeholder>
         )
