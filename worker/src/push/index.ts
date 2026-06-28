@@ -13,8 +13,8 @@ import { and, eq } from 'drizzle-orm';
 import type { Env } from '../env.ts';
 import type { ProbeSnapshot } from '../shared.ts';
 import { getDb } from '../db/client.ts';
-import { probeHosts, pushDevices } from '../db/schema.ts';
-import { buildMessages, currentBreaches, sameSet, thresholdsFromEnv } from './alerts.ts';
+import { alertRules, probeHosts, pushDevices } from '../db/schema.ts';
+import { buildMessages, currentBreaches, mergeThresholds, sameSet, thresholdsFromEnv } from './alerts.ts';
 import { FcmNotifier, FcmTokenError, fcmConfigFromEnv } from './fcm.ts';
 
 export type PushPlatform = 'apns' | 'fcm' | 'webpush';
@@ -64,7 +64,12 @@ export async function dispatchAlerts(
     .get();
   if (!host) return;
 
-  const thresholds = thresholdsFromEnv(env);
+  const override = await db
+    .select({ cpu: alertRules.cpu, mem: alertRules.mem, disk: alertRules.disk })
+    .from(alertRules)
+    .where(eq(alertRules.userId, userId))
+    .get();
+  const thresholds = mergeThresholds(thresholdsFromEnv(env), override ?? null);
   const previous = parseBreaches(host.alertState);
   const current = currentBreaches(snapshot, thresholds);
 

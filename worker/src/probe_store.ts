@@ -23,6 +23,11 @@ export async function storeSnapshot(
   const raw = JSON.stringify(snapshot);
   const limit = probeHistoryLimit(env);
 
+  // Extracted metrics, stored as columns for cheap history/aggregation queries.
+  const cpuUsage = snapshot.cpu_usage;
+  const memTotal = snapshot.memory.mem_total_kb;
+  const memPct = memTotal > 0 ? (snapshot.memory.mem_used_kb / memTotal) * 100 : null;
+
   const updateLatest = db
     .update(probeHosts)
     .set({ latestSnapshot: raw, lastSeenAt: now })
@@ -49,6 +54,8 @@ export async function storeSnapshot(
       collectedAt: snapshot.collected_at_ms,
       receivedAt: now,
       snapshot: raw,
+      cpuUsage,
+      memPct,
     }),
     db
       .delete(probeSnapshots)

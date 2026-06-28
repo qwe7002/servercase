@@ -3,7 +3,7 @@
  * which mints a per-host bearer token the probe agent uses to upload snapshots.
  * The raw token is returned exactly once at creation.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte } from 'drizzle-orm';
 import type { Ctx } from '../router.ts';
 import { json, notFound, readJson, requireString } from '../http.ts';
 import { newId, newProbeToken, sha256Hex } from '../ids.ts';
@@ -66,7 +66,11 @@ export async function deleteProbe(ctx: Ctx): Promise<Response> {
   return json({ deleted: true });
 }
 
-/** GET /v1/probes/:id/history — recent snapshots for one host, newest first. */
+/**
+ * GET /v1/probes/:id/history — recent metric points for one host, oldest first
+ * (chart-ready). Returns the extracted cpu/mem columns rather than the full
+ * snapshot JSON. `?limit=` (default 240, max 1000) and `?since=<epoch ms>`.
+ */
 export async function probeHistory(ctx: Ctx): Promise<Response> {
   const user = await requireUser(ctx);
   const db = getDb(ctx.env);
@@ -79,27 +83,26 @@ export async function probeHistory(ctx: Ctx): Promise<Response> {
   if (!host) throw notFound('probe host not found');
 
   const limit = Math.min(
-    Math.max(Number.parseInt(ctx.url.searchParams.get('limit') ?? '50', 10) || 50, 1),
-    500,
+    Math.max(Number.parseInt(ctx.url.searchParams.get('limit') ?? '240', 10) || 240, 1),
+    1000,
   );
+  const since = Number.parseInt(ctx.url.searchParams.get('since') ?? '', 10);
+  const where = Number.isFinite(since)
+    ? and(eq(probeSnapshots.hostId, host.id), gte(probeSnapshots.collectedAt, since))
+    : eq(probeSnapshots.hostId, host.id);
+
+  // Take the newest `limit` rows, then return them oldest-first for charting.
   const rows = await db
     .select({
       collectedAt: probeSnapshots.collectedAt,
-      receivedAt: probeSnapshots.receivedAt,
-      snapshot: probeSnapshots.snapshot,
+      cpuUsage: probeSnapshots.cpuUsage,
+      memPct: probeSnapshots.memPct,
     })
     .from(probeSnapshots)
-    .where(eq(probeSnapshots.hostId, host.id))
+    .where(where)
     .orderBy(desc(probeSnapshots.id))
     .limit(limit)
     .all();
 
-  return json({
-    hostId: host.id,
-    snapshots: rows.map((r) => ({
-      collectedAt: r.collectedAt,
-      receivedAt: r.receivedAt,
-      snapshot: JSON.parse(r.snapshot),
-    })),
-  });
+  return json({ hostId: host.id, points: rows.reverse() });
 }

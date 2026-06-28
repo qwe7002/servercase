@@ -22,6 +22,23 @@ export function thresholdsFromEnv(env: Env): Thresholds {
   };
 }
 
+/** A per-user override row; null fields fall back to the env default. */
+export interface ThresholdOverride {
+  cpu: number | null;
+  mem: number | null;
+  disk: number | null;
+}
+
+/** Merges a per-user override over the env defaults. */
+export function mergeThresholds(defaults: Thresholds, override: ThresholdOverride | null): Thresholds {
+  if (!override) return defaults;
+  return {
+    cpu: override.cpu ?? defaults.cpu,
+    mem: override.mem ?? defaults.mem,
+    disk: override.disk ?? defaults.disk,
+  };
+}
+
 interface DiskUsage {
   mount: string;
   used_kb: number;

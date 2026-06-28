@@ -20,6 +20,7 @@ import { createProbe, deleteProbe, listProbes, probeHistory } from './routes/pro
 import { ingest, openProbeSocket } from './routes/ingest.ts';
 import { openUserStream } from './routes/stream.ts';
 import { deleteDevice, listDevices, registerDevice } from './routes/devices.ts';
+import { getAlerts, putAlerts } from './routes/alerts.ts';
 
 export { ProbeSocket } from './probe_socket.ts';
 export { UserHub } from './user_hub.ts';
@@ -50,10 +51,14 @@ router.get('/v1/probes/:id/history', probeHistory);
 router.post('/v1/ingest', ingest);
 router.get('/v1/ingest/ws', openProbeSocket);
 
-// Push devices (future-prep).
+// Push devices.
 router.get('/v1/devices', listDevices);
 router.post('/v1/devices', registerDevice);
 router.delete('/v1/devices/:id', deleteDevice);
+
+// Per-user alert thresholds.
+router.get('/v1/alerts', getAlerts);
+router.put('/v1/alerts', putAlerts);
 
 export default {
   async fetch(req: Request, env: Env, exec: ExecutionContext): Promise<Response> {

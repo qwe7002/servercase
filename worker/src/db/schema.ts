@@ -8,7 +8,7 @@
  * snapshot per user, latest + bounded probe history per host, and registered
  * push devices. No SSH credentials or vault data ever land here.
  */
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // ── Accounts ────────────────────────────────────────────────────────────────
 export const users = sqliteTable(
@@ -60,7 +60,9 @@ export const probeHosts = sqliteTable(
   ],
 );
 
-// Optional rolling history, trimmed to PROBE_HISTORY_LIMIT rows per host.
+// Optional rolling history, trimmed to PROBE_HISTORY_LIMIT rows per host. The
+// cpu_usage and mem_pct columns are extracted from the snapshot at ingest so
+// history queries and future aggregation don't have to parse JSON.
 export const probeSnapshots = sqliteTable(
   'probe_snapshots',
   {
@@ -71,9 +73,23 @@ export const probeSnapshots = sqliteTable(
     collectedAt: integer('collected_at').notNull(),
     receivedAt: integer('received_at').notNull(),
     snapshot: text('snapshot').notNull(),
+    cpuUsage: real('cpu_usage'),
+    memPct: real('mem_pct'),
   },
   (t) => [index('idx_probe_snapshots_host').on(t.hostId, t.id)],
 );
+
+// Per-user alert thresholds (percent). A null column falls back to the
+// ALERT_*_PCT default; missing row means all defaults.
+export const alertRules = sqliteTable('alert_rules', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  cpu: integer('cpu'),
+  mem: integer('mem'),
+  disk: integer('disk'),
+  updatedAt: integer('updated_at').notNull(),
+});
 
 // ── Push devices (future-prep) ──────────────────────────────────────────────
 // Registered client push tokens. Stored now so the apps can register; the

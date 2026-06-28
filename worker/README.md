@@ -75,7 +75,7 @@ Config (`wrangler.toml [vars]`):
 |-----|---------|---------|
 | `ALLOW_REGISTRATION` | `1` | Set `0` to close public signup. |
 | `PROBE_HISTORY_LIMIT` | `240` | History rows kept per host (`0` = latest only). |
-| `ALERT_CPU_PCT` / `ALERT_MEM_PCT` / `ALERT_DISK_PCT` | `90` | Push alert thresholds (percent). |
+| `ALERT_CPU_PCT` / `ALERT_MEM_PCT` / `ALERT_DISK_PCT` | `90` | Default alert thresholds (percent); per-user overrides via `PUT /v1/alerts`. |
 | `SESSION_SECRET` | *(secret)* | HMAC key for session tokens. **Required.** |
 | `FCM_SERVICE_ACCOUNT` | *(secret)* | Firebase service-account JSON for push. Optional. |
 
@@ -142,7 +142,7 @@ Durable Object (hibernating) that the ingest paths publish into. Messages:
 | `GET`    | `/v1/probes` | session | List hosts + their latest snapshot. |
 | `POST`   | `/v1/probes` | session | `{ name }` → `{ host, token }` (**token shown once**). |
 | `DELETE` | `/v1/probes/:id` | session | Revoke a host and its history. |
-| `GET`    | `/v1/probes/:id/history?limit=` | session | Recent snapshots, newest first. |
+| `GET`    | `/v1/probes/:id/history?limit=&since=` | session | Metric points (CPU/mem %), oldest first, for charts. |
 | `POST`   | `/v1/ingest` | probe token | Upload one `servercase.probe.v1` snapshot over HTTP. |
 | `GET`    | `/v1/ingest/ws` | probe token | **WebSocket**: stream one snapshot per text frame. |
 
@@ -176,8 +176,9 @@ done
 
 Threshold alerts are delivered over **Firebase Cloud Messaging**. On each
 ingested snapshot the worker evaluates CPU / memory / per-mount disk against the
-`ALERT_*_PCT` thresholds and, on a *transition* (a metric crossing its threshold
-or recovering), sends a push to the user's registered `fcm` devices. Tokens FCM
+effective thresholds (per-user overrides resolved against the `ALERT_*_PCT`
+defaults) and, on a *transition* (a metric crossing its threshold or
+recovering), sends a push to the user's registered `fcm` devices. Tokens FCM
 reports as dead are pruned automatically. Messages carry
 `data: { hostId, type: "alert" | "recovery", metric }` for client routing.
 
@@ -186,6 +187,8 @@ reports as dead are pruned automatically. Messages carry
 | `GET`    | `/v1/devices` | — | List registered devices. |
 | `POST`   | `/v1/devices` | `{ platform, token, label? }` | `platform` ∈ `apns`/`fcm`/`webpush`; idempotent. |
 | `DELETE` | `/v1/devices/:id` | — | Unregister. |
+| `GET`    | `/v1/alerts` | — | `{ defaults, overrides, effective }` thresholds. |
+| `PUT`    | `/v1/alerts` | `{ cpu?, mem?, disk? }` | Per-user overrides; a number sets it, `null` clears to default. |
 
 **Enable it:** create a Firebase project, download a *service-account* key
 (Project settings → Service accounts → Generate new private key), and store the

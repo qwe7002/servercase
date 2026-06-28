@@ -15,6 +15,13 @@
       "when": 1782568548605,
       "tag": "0001_shiny_plazm",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782632821377,
+      "tag": "0002_fine_bishop",
+      "breakpoints": true
     }
   ]
 }

@@ -87,6 +87,12 @@ export const authApi = {
   me: () => api<{ user: CloudUser }>('/v1/auth/me'),
 };
 
+export interface HistoryPoint {
+  collectedAt: number;
+  cpuUsage: number | null;
+  memPct: number | null;
+}
+
 export const probesApi = {
   list: () => api<{ hosts: ProbeHost[] }>('/v1/probes'),
   create: (name: string) =>
@@ -96,6 +102,31 @@ export const probesApi = {
     }),
   remove: (id: string) =>
     api<{ deleted: boolean }>(`/v1/probes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  history: (id: string, sinceMs?: number) =>
+    api<{ hostId: string; points: HistoryPoint[] }>(
+      `/v1/probes/${encodeURIComponent(id)}/history` + (sinceMs ? `?since=${sinceMs}` : ''),
+    ),
+};
+
+export interface Thresholds {
+  cpu: number;
+  mem: number;
+  disk: number;
+}
+export interface ThresholdOverrides {
+  cpu: number | null;
+  mem: number | null;
+  disk: number | null;
+}
+
+export const alertsApi = {
+  get: () =>
+    api<{ defaults: Thresholds; overrides: ThresholdOverrides; effective: Thresholds }>('/v1/alerts'),
+  put: (overrides: ThresholdOverrides) =>
+    api<{ overrides: ThresholdOverrides; effective: Thresholds }>('/v1/alerts', {
+      method: 'PUT',
+      body: JSON.stringify(overrides),
+    }),
 };
 
 export const devicesApi = {
