@@ -75,6 +75,7 @@ Config (`wrangler.toml [vars]`):
 |-----|---------|---------|
 | `ALLOW_REGISTRATION` | `1` | Set `0` to close public signup. |
 | `PROBE_HISTORY_LIMIT` | `240` | History rows kept per host (`0` = latest only). |
+| `PROBE_FLUSH_SECONDS` | `60` | Batch-flush interval for streaming ingest (min 5). |
 | `ALERT_CPU_PCT` / `ALERT_MEM_PCT` / `ALERT_DISK_PCT` | `90` | Default alert thresholds (percent); per-user overrides via `PUT /v1/alerts`. |
 | `SESSION_SECRET` | *(secret)* | HMAC key for session tokens. **Required.** |
 | `FCM_SERVICE_ACCOUNT` | *(secret)* | Firebase service-account JSON for push. Optional. |
@@ -152,6 +153,13 @@ one `servercase.probe.v1` line per text frame. It is backed by a
 [Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/),
 so idle connections cost nothing and pings are auto-answered. The token is sent
 in the `Authorization` header (or `?token=` for clients that can't set headers).
+
+To keep D1 writes low, the DO buffers samples in its own (hibernation-safe)
+storage and flushes them to D1 in **one batch per `PROBE_FLUSH_SECONDS`** (one
+`latest` update + one multi-row history insert + one trim) rather than writing
+every sample. Live fan-out and alert evaluation still happen on every frame, so
+the panel and push stay instant. The HTTP `POST /v1/ingest` fallback writes per
+request.
 
 Don't hand-roll a client: deploy the agent with [`deploy/install.sh`](../deploy),
 which streams the probe's stdout through `websocat`:

@@ -13,6 +13,12 @@ export interface Env {
   /** Max history rows kept per probe host. Defaults to 240. "0" keeps latest only. */
   PROBE_HISTORY_LIMIT?: string;
   /**
+   * How often the streaming-ingest Durable Object flushes buffered snapshots to
+   * D1, in seconds (min 5). Defaults to 60 — one batch write per minute per
+   * host instead of one per sample.
+   */
+  PROBE_FLUSH_SECONDS?: string;
+  /**
    * Firebase service-account JSON (the whole downloaded file, as a string) used
    * to send FCM push. Set via `wrangler secret put FCM_SERVICE_ACCOUNT`. When
    * absent, push delivery is disabled (alerts are simply not sent).
@@ -32,4 +38,9 @@ export function registrationAllowed(env: Env): boolean {
 export function probeHistoryLimit(env: Env): number {
   const n = Number.parseInt(env.PROBE_HISTORY_LIMIT ?? '240', 10);
   return Number.isFinite(n) && n >= 0 ? n : 240;
+}
+
+export function probeFlushSeconds(env: Env): number {
+  const n = Number.parseInt(env.PROBE_FLUSH_SECONDS ?? '60', 10);
+  return Number.isFinite(n) && n >= 5 ? n : 60;
 }

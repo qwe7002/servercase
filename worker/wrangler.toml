@@ -40,6 +40,9 @@ new_sqlite_classes = ["ProbeSocket", "UserHub"]
 ALLOW_REGISTRATION = "1"
 # How many historical probe snapshots to keep per host (0 = keep only latest).
 PROBE_HISTORY_LIMIT = "240"
+# How often the streaming-ingest DO flushes buffered samples to D1, in seconds
+# (min 5). One batch write per host per interval instead of one per sample.
+PROBE_FLUSH_SECONDS = "60"
 # Push alert thresholds (percent). An alert fires when a metric crosses these.
 ALERT_CPU_PCT = "90"
 ALERT_MEM_PCT = "90"

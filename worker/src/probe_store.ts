@@ -63,3 +63,62 @@ export async function storeSnapshot(
   ]);
   return now;
 }
+
+/** One buffered probe sample held in the Durable Object between flushes. */
+export interface BufferedSample {
+  collectedAt: number;
+  cpuUsage: number | null;
+  memPct: number | null;
+  /** The raw servercase.probe.v1 JSON. */
+  raw: string;
+}
+
+/**
+ * Persist a batch of buffered samples in a single D1 round-trip: update the
+ * host's latest snapshot once, insert all history rows in one multi-row INSERT,
+ * and trim once. Called per minute by the ProbeSocket DO instead of writing on
+ * every sample.
+ */
+export async function persistBatch(
+  env: Env,
+  hostId: string,
+  samples: BufferedSample[],
+): Promise<void> {
+  if (samples.length === 0) return;
+  const db = getDb(env);
+  const now = Date.now();
+  const limit = probeHistoryLimit(env);
+  const latest = samples.reduce((a, b) => (b.collectedAt > a.collectedAt ? b : a));
+
+  const updateLatest = db
+    .update(probeHosts)
+    .set({ latestSnapshot: latest.raw, lastSeenAt: now })
+    .where(eq(probeHosts.id, hostId));
+
+  if (limit === 0) {
+    await updateLatest;
+    return;
+  }
+
+  const insert = db.insert(probeSnapshots).values(
+    samples.map((s) => ({
+      hostId,
+      collectedAt: s.collectedAt,
+      receivedAt: now,
+      snapshot: s.raw,
+      cpuUsage: s.cpuUsage,
+      memPct: s.memPct,
+    })),
+  );
+  const keep = db
+    .select({ id: probeSnapshots.id })
+    .from(probeSnapshots)
+    .where(eq(probeSnapshots.hostId, hostId))
+    .orderBy(desc(probeSnapshots.id))
+    .limit(limit);
+  const trim = db
+    .delete(probeSnapshots)
+    .where(and(eq(probeSnapshots.hostId, hostId), notInArray(probeSnapshots.id, keep)));
+
+  await db.batch([updateLatest, insert, trim]);
+}
