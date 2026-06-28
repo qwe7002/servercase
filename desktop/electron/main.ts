@@ -7,6 +7,7 @@ import {
   IpcChannels,
   type BitwardenSettings,
   type BridgeServerEntry,
+  type PortForwardRequest,
   type ServerConfig,
   type ServerSecrets,
 } from './shared.js';
@@ -72,6 +73,16 @@ function registerIpc(): void {
   ipcMain.handle(
     IpcChannels.runCommand,
     (_e, serverId: string, command: string) => ssh.execCommand(serverId, command),
+  );
+  ipcMain.handle(
+    IpcChannels.portForwardOpen,
+    (_e, request: PortForwardRequest) => ssh.openPortForward(request),
+  );
+  ipcMain.handle(IpcChannels.portForwardClose, (_e, forwardId: string) =>
+    ssh.closePortForward(forwardId),
+  );
+  ipcMain.handle(IpcChannels.portForwardList, (_e, serverId?: string) =>
+    ssh.listPortForwards(serverId),
   );
   ipcMain.handle(
     IpcChannels.shellOpen,

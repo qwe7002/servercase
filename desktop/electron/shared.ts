@@ -73,6 +73,30 @@ export interface CommandResult {
   code: number | null;
 }
 
+export interface PortForwardRequest {
+  serverId: string;
+  /** Local interface to bind. Defaults to 127.0.0.1. */
+  localHost?: string;
+  /** Local TCP port. Use 0 to let the OS choose a free port. */
+  localPort: number;
+  /** Host reached from the remote SSH server. Defaults to 127.0.0.1. */
+  remoteHost?: string;
+  remotePort: number;
+  /** Optional caller-owned label for UI/debug output. */
+  label?: string;
+}
+
+export interface PortForwardInfo {
+  id: string;
+  serverId: string;
+  localHost: string;
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+  label?: string;
+  openedAt: number;
+}
+
 // ── Global settings ─────────────────────────────────────────────────────────
 
 /** A reusable shell command, runnable in any server's terminal. */
@@ -251,6 +275,9 @@ export const IpcChannels = {
   shellData: 'sc:shell:data',
   shellResize: 'sc:shell:resize',
   shellClose: 'sc:shell:close',
+  portForwardOpen: 'sc:portForward:open',
+  portForwardClose: 'sc:portForward:close',
+  portForwardList: 'sc:portForward:list',
   // bitwarden secret vault (via `bw` CLI)
   bwStatus: 'sc:bw:status',
   bwConfigure: 'sc:bw:configure',

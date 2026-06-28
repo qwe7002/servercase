@@ -7,6 +7,8 @@ import {
   type BridgeServerEntry,
   type CommandResult,
   type ConnectionEvent,
+  type PortForwardInfo,
+  type PortForwardRequest,
   type ServerConfig,
   type ServerSecrets,
   type ServerStatus,
@@ -23,6 +25,15 @@ const api = {
     ipcRenderer.invoke(IpcChannels.fetchStatus, serverId),
   runCommand: (serverId: string, command: string): Promise<CommandResult> =>
     ipcRenderer.invoke(IpcChannels.runCommand, serverId, command),
+
+  ports: {
+    open: (request: PortForwardRequest): Promise<PortForwardInfo> =>
+      ipcRenderer.invoke(IpcChannels.portForwardOpen, request),
+    close: (forwardId: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.portForwardClose, forwardId),
+    list: (serverId?: string): Promise<PortForwardInfo[]> =>
+      ipcRenderer.invoke(IpcChannels.portForwardList, serverId),
+  },
 
   openShell: (
     serverId: string,
