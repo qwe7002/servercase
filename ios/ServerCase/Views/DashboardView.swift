@@ -57,7 +57,7 @@ struct DashboardView: View {
         case .overview:
             overview
         case .terminal:
-            TerminalView(server: server)
+            TerminalTabsView(server: server)
         case .files:
             FilesView(server: server)
         }

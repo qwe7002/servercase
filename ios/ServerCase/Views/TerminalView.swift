@@ -10,6 +10,8 @@ struct TerminalView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     let server: ServerConfig
+    /// When false (an inactive tab) the terminal gives up the keyboard.
+    var isActive: Bool = true
 
     @StateObject private var bridge = TerminalBridge()
 
@@ -17,7 +19,7 @@ struct TerminalView: View {
         let terminal = model.settings.terminal
         ZStack(alignment: .topTrailing) {
             if let service = model.service(server.id) {
-                SwiftTermTerminalView(service: service, bridge: bridge, settings: terminal)
+                SwiftTermTerminalView(service: service, bridge: bridge, settings: terminal, isActive: isActive)
                     .padding(.horizontal, terminalHorizontalInset)
                     .padding(.vertical, terminalVerticalInset)
                     .background(Color(uiColor: UIColor(hex: terminal.colorScheme.backgroundHex)))
@@ -118,6 +120,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
     let service: SSHService
     let bridge: TerminalBridge
     let settings: TerminalSettings
+    let isActive: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(service: service, bridge: bridge)
@@ -135,8 +138,8 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
         context.coordinator.startKeyboardMonitor(for: terminal)
         bridge.attach(context.coordinator)
 
-        DispatchQueue.main.async {
-            _ = terminal.becomeFirstResponder()
+        if isActive {
+            DispatchQueue.main.async { _ = terminal.becomeFirstResponder() }
         }
 
         return terminal
@@ -145,6 +148,14 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
     func updateUIView(_ uiView: SwiftTerm.TerminalView, context: Context) {
         context.coordinator.update(service: service, terminal: uiView)
         applyAppearance(to: uiView)
+        // Only the active tab keeps the keyboard.
+        if isActive {
+            if !uiView.isFirstResponder {
+                DispatchQueue.main.async { _ = uiView.becomeFirstResponder() }
+            }
+        } else if uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
         bridge.attach(context.coordinator)
     }
 
