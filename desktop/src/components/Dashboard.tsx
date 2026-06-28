@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { ServerConfig } from '../../electron/shared';
 import { useServers } from '../store/servers';
+import { useProbes } from '../store/probes';
 import { formatKb, formatUptime, percent } from '../format';
+import { statusFromProbe } from '../lib/probeStatus';
 import { Gauge, UsageBar } from './StatusCard';
 import { TerminalTabs } from './TerminalTabs';
 import { Sftp } from './Sftp';
@@ -25,7 +27,14 @@ type Tab = 'overview' | 'terminal' | 'files';
 
 export function Dashboard({ server }: Props) {
   const connState = useServers((s) => s.connState[server.id]) ?? 'disconnected';
-  const status = useServers((s) => s.status[server.id]);
+  const sshStatus = useServers((s) => s.status[server.id]);
+  const probeHost = useProbes((s) =>
+    server.probeHostId ? s.hosts.find((host) => host.id === server.probeHostId) : undefined,
+  );
+  const probeStatus = probeHost?.snapshot
+    ? statusFromProbe(probeHost.snapshot)
+    : undefined;
+  const status = probeStatus ?? sshStatus;
   const lastError = useServers((s) => s.lastError[server.id]);
   const setConnState = useServers((s) => s.setConnState);
   const [tab, setTab] = useState<Tab>('overview');
@@ -50,6 +59,8 @@ export function Dashboard({ server }: Props) {
   };
 
   const connected = connState === 'connected';
+  const usesProbe = !!server.probeHostId;
+  const probeWaiting = usesProbe && !probeStatus;
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -61,6 +72,7 @@ export function Dashboard({ server }: Props) {
           <p className="truncate text-sm text-muted-foreground">
             {server.username}@{server.host}:{server.port}
             {status?.kernel ? ` · ${status.kernel}` : ''}
+            {probeStatus ? ` · probe: ${probeHost?.name ?? 'linked'}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -103,7 +115,13 @@ export function Dashboard({ server }: Props) {
         ) : (
           <Placeholder>Connect to browse files over SFTP.</Placeholder>
         )
-      ) : !connected ? (
+      ) : probeWaiting ? (
+        <Placeholder>
+          {probeHost
+            ? 'Waiting for the linked probe to report status…'
+            : 'Linked probe host was not found. Choose another probe in Edit server.'}
+        </Placeholder>
+      ) : !connected && !probeStatus ? (
         <Placeholder>
           {connState === 'connecting'
             ? 'Establishing SSH connection…'

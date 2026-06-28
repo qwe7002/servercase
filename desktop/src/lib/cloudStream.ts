@@ -23,7 +23,9 @@ export interface ProbeSnapshotV1 {
   network: {
     rx_bytes_per_sec: number | null;
     tx_bytes_per_sec: number | null;
+    interfaces?: { name: string; ipv4: string[]; ipv6: string[] }[];
     public_ipv4: string | null;
+    public_ipv6?: string | null;
   };
 }
 

@@ -32,6 +32,8 @@ PUBLIC_IP=""        # set to "--public-ip" to enable public-IP lookup
 PROBE_URL=""        # download URL for the servercase-probe binary
 PROBE_PATH=""       # path to a prebuilt servercase-probe binary
 BUILD_DIR=""        # cargo source dir to build from (defaults to repo ../probe)
+GITHUB_REPO="${SERVERCASE_GITHUB_REPO:-qwe7002/servercase}"
+GITHUB_TAG="${SERVERCASE_PROBE_VERSION:-latest}"
 WEBSOCAT_URL=""     # override websocat download URL
 WEBSOCAT_VERSION="1.13.0"
 PREFIX="/opt/servercase-probe"
@@ -63,6 +65,8 @@ while [ $# -gt 0 ]; do
     --probe-url)        PROBE_URL="$2"; shift 2;;
     --probe-path)       PROBE_PATH="$2"; shift 2;;
     --build)            BUILD_DIR="$2"; shift 2;;
+    --github-repo)      GITHUB_REPO="$2"; shift 2;;
+    --probe-version)    GITHUB_TAG="$2"; shift 2;;
     --websocat-url)     WEBSOCAT_URL="$2"; shift 2;;
     --prefix)           PREFIX="$2"; shift 2;;
     --user)             SERVICE_USER="$2"; shift 2;;
@@ -100,10 +104,19 @@ fetch() { # fetch <url> <dest>
 }
 
 case "$(uname -m)" in
-  x86_64|amd64)   ARCH="x86_64";;
-  aarch64|arm64)  ARCH="aarch64";;
+  x86_64|amd64)   ARCH="x86_64"; PROBE_TARGET="x86_64-unknown-linux-gnu";;
+  aarch64|arm64)  ARCH="aarch64"; PROBE_TARGET="aarch64-unknown-linux-gnu";;
   *)              die "unsupported architecture: $(uname -m)";;
 esac
+
+probe_release_url() {
+  asset="servercase-probe-${PROBE_TARGET}"
+  if [ "$GITHUB_TAG" = "latest" ]; then
+    printf 'https://github.com/%s/releases/latest/download/%s\n' "$GITHUB_REPO" "$asset"
+  else
+    printf 'https://github.com/%s/releases/download/%s/%s\n' "$GITHUB_REPO" "$GITHUB_TAG" "$asset"
+  fi
+}
 
 # ── Resolve the ingest URL ───────────────────────────────────────────────────
 if [ -z "$WS_URL" ]; then
@@ -148,7 +161,11 @@ else
     ( cd "$SRC" && cargo build --release )
     install -m 0755 "$SRC/target/release/servercase-probe" "$PREFIX/servercase-probe"
   else
-    die "no probe binary: pass --probe-path or --probe-url (or run inside the repo with cargo)"
+    URL="$(probe_release_url)"
+    log "Downloading probe from ${URL}"
+    fetch "$URL" "$PREFIX/servercase-probe" \
+      || die "could not download probe binary; pass --probe-path or --probe-url"
+    chmod 0755 "$PREFIX/servercase-probe"
   fi
 fi
 

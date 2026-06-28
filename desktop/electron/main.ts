@@ -70,6 +70,10 @@ function registerIpc(): void {
     ssh.fetchStatus(serverId),
   );
   ipcMain.handle(
+    IpcChannels.runCommand,
+    (_e, serverId: string, command: string) => ssh.execCommand(serverId, command),
+  );
+  ipcMain.handle(
     IpcChannels.shellOpen,
     (_e, serverId: string, shellId: string, cols: number, rows: number) =>
       ssh.openShell(serverId, shellId, cols, rows),

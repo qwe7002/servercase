@@ -30,6 +30,17 @@ cargo run -- --interval 10 --public-ip
 `--public-ip` additionally looks up the host's public addresses (needs outbound
 internet and `curl`/`wget`; cached for ~5 minutes, off by default).
 
+## Release binaries
+
+The repository includes a GitHub Actions workflow that publishes Linux binaries
+for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on `v*` tags.
+The deployment script can download those assets automatically:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/main/deploy/install.sh \
+  | sudo bash -s -- --api https://worker.example.com --token scp_xxx
+```
+
 ## Cloudflare Worker
 
 The cloud side lives in [`../worker`](../worker) and stays thin:

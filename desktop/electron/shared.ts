@@ -13,6 +13,8 @@ export interface ServerConfig {
   authType: AuthType;
   /** Id of the {@link Group} this server belongs to, if any. */
   groupId?: string;
+  /** Cloud probe host id to use for overview status instead of SSH polling. */
+  probeHostId?: string;
   /** Present when authType === 'password'. */
   password?: string;
   /** PEM private key text, present when authType === 'key'. */
@@ -63,6 +65,12 @@ export interface ConnectionEvent {
   serverId: string;
   state: ConnectionState;
   error?: string;
+}
+
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  code: number | null;
 }
 
 // ── Global settings ─────────────────────────────────────────────────────────
@@ -238,6 +246,7 @@ export const IpcChannels = {
   connect: 'sc:connect',
   disconnect: 'sc:disconnect',
   fetchStatus: 'sc:fetchStatus',
+  runCommand: 'sc:runCommand',
   shellOpen: 'sc:shell:open',
   shellData: 'sc:shell:data',
   shellResize: 'sc:shell:resize',

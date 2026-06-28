@@ -31,9 +31,9 @@ sudo ./install.sh \
   --interval 10 --public-ip
 ```
 
-Run straight from a checkout (builds the probe with `cargo` if no binary is
-given), or `curl … | sudo bash -s -- --api … --token …` once `install.sh` is
-hosted.
+Run straight from a checkout (builds the probe with `cargo` when available), or
+pipe the hosted installer. Without a local build or `--probe-url`, the script
+downloads the matching Linux binary from GitHub Releases.
 
 ## Flags
 
@@ -48,6 +48,8 @@ hosted.
 | `--public-ip` | Also look up the host's public IP. |
 | `--probe-path <file>` / `--probe-url <url>` | Use a prebuilt probe binary instead of building. |
 | `--build <dir>` | Cargo source dir to build from (default: repo `../probe`). |
+| `--github-repo <owner/repo>` | Release repo for automatic probe downloads (default `qwe7002/servercase`, or `$SERVERCASE_GITHUB_REPO`). |
+| `--probe-version <tag>` | Release tag to download (default `latest`, or `$SERVERCASE_PROBE_VERSION`). |
 | `--websocat-url <url>` | Override the websocat download. |
 | `--prefix <dir>` / `--user <name>` | Install dir (default `/opt/servercase-probe`) / service user. |
 | `--uninstall` | Stop, disable and remove the service and files. |

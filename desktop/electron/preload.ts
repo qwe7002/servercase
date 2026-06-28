@@ -5,6 +5,7 @@ import {
   type BitwardenStatus,
   type BridgeInfo,
   type BridgeServerEntry,
+  type CommandResult,
   type ConnectionEvent,
   type ServerConfig,
   type ServerSecrets,
@@ -20,6 +21,8 @@ const api = {
     ipcRenderer.invoke(IpcChannels.disconnect, serverId),
   fetchStatus: (serverId: string): Promise<ServerStatus> =>
     ipcRenderer.invoke(IpcChannels.fetchStatus, serverId),
+  runCommand: (serverId: string, command: string): Promise<CommandResult> =>
+    ipcRenderer.invoke(IpcChannels.runCommand, serverId, command),
 
   openShell: (
     serverId: string,
