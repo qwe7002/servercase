@@ -36,8 +36,10 @@ import {
 import { useCloud, hasValidSession } from '../store/cloud';
 import { cloudAuth, cloudPull, cloudPush, CloudError } from '../lib/cloud';
 import { CloudProbes } from './CloudProbes';
+import { TERMINAL_SCHEMES, TERMINAL_SCHEME_LABELS } from '../lib/terminalTheme';
+import type { TerminalColorScheme, TerminalCursorStyle } from '../../electron/shared';
 
-type Section = 'bitwarden' | 'snippets' | 'cloud' | 'bridge';
+type Section = 'bitwarden' | 'snippets' | 'cloud' | 'terminal' | 'bridge';
 
 interface Props {
   onDone: () => void;
@@ -56,10 +58,11 @@ export function Settings({ onDone }: Props) {
         </DialogHeader>
 
         <Tabs value={section} onValueChange={(v) => setSection(v as Section)}>
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="bitwarden">Keychain</TabsTrigger>
             <TabsTrigger value="snippets">Snippets</TabsTrigger>
             <TabsTrigger value="cloud">Cloud</TabsTrigger>
+            <TabsTrigger value="terminal">Terminal</TabsTrigger>
             <TabsTrigger value="bridge">AI</TabsTrigger>
           </TabsList>
         </Tabs>
@@ -68,6 +71,7 @@ export function Settings({ onDone }: Props) {
           {section === 'bitwarden' && <BitwardenSection />}
           {section === 'snippets' && <SnippetsSection />}
           {section === 'cloud' && <CloudSection />}
+          {section === 'terminal' && <TerminalSection />}
           {section === 'bridge' && <BridgeSection />}
         </div>
       </DialogContent>
@@ -623,6 +627,116 @@ function CloudSection() {
 
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
       {err && <p className="text-sm text-destructive">{err}</p>}
+    </div>
+  );
+}
+
+// ── Terminal ────────────────────────────────────────────────────────────────
+
+function Segmented<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="inline-flex flex-wrap gap-1 rounded-md border p-1">
+      {options.map((o) => (
+        <Button
+          key={o.value}
+          size="sm"
+          variant={value === o.value ? 'default' : 'ghost'}
+          className="h-7"
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+function TerminalSection() {
+  const term = useSettings((s) => s.settings.terminal);
+  const setTerminal = useSettings((s) => s.setTerminal);
+  const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+  const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
+  const scheme = TERMINAL_SCHEMES[term.colorScheme];
+
+  return (
+    <div className="grid gap-5 py-4">
+      <div className="space-y-1">
+        <Label className="flex items-center gap-2">
+          <Terminal className="size-4" /> Terminal appearance
+        </Label>
+        <p className="text-sm text-muted-foreground">
+          Applies to the SSH terminal on every server, and syncs across your
+          devices through Cloud.
+        </p>
+      </div>
+
+      <Separator />
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor="term-font">Font size</Label>
+          <Input
+            id="term-font"
+            inputMode="numeric"
+            value={String(term.fontSize)}
+            onChange={(e) => setTerminal({ fontSize: clamp(Number(e.target.value) || 13, 8, 32) })}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="term-scroll">Scrollback (lines)</Label>
+          <Input
+            id="term-scroll"
+            inputMode="numeric"
+            value={String(term.scrollback)}
+            onChange={(e) =>
+              setTerminal({ scrollback: clamp(Number(e.target.value) || 1000, 100, 100000) })
+            }
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label>Cursor style</Label>
+        <Segmented<TerminalCursorStyle>
+          options={(['block', 'underline', 'bar'] as const).map((s) => ({ value: s, label: cap(s) }))}
+          value={term.cursorStyle}
+          onChange={(v) => setTerminal({ cursorStyle: v })}
+        />
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Label>Cursor blink</Label>
+        <Switch
+          checked={term.cursorBlink}
+          onCheckedChange={(v) => setTerminal({ cursorBlink: v })}
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <Label>Color scheme</Label>
+        <Segmented<TerminalColorScheme>
+          options={(Object.keys(TERMINAL_SCHEMES) as TerminalColorScheme[]).map((s) => ({
+            value: s,
+            label: TERMINAL_SCHEME_LABELS[s],
+          }))}
+          value={term.colorScheme}
+          onChange={(v) => setTerminal({ colorScheme: v })}
+        />
+        <div
+          className="mt-1 rounded-md border p-3 font-mono text-xs"
+          style={{ background: scheme.background, color: scheme.foreground }}
+        >
+          user@host:~$ echo preview
+        </div>
+      </div>
     </div>
   );
 }

@@ -129,6 +129,19 @@ export interface CloudSettings {
   autoPush: boolean;
 }
 
+export type TerminalCursorStyle = 'block' | 'underline' | 'bar';
+export type TerminalColorScheme = 'charcoal' | 'black' | 'light' | 'solarized';
+
+/** Appearance/behaviour of the SSH terminal, shared across servers and synced. */
+export interface TerminalSettings {
+  fontSize: number;
+  cursorBlink: boolean;
+  cursorStyle: TerminalCursorStyle;
+  /** Lines of scrollback to keep. */
+  scrollback: number;
+  colorScheme: TerminalColorScheme;
+}
+
 /** A named group/folder used to organize the server list. */
 export interface Group {
   id: string;
@@ -140,6 +153,7 @@ export interface GlobalSettings {
   snippets: Snippet[];
   bridge: BridgeSettings;
   cloud: CloudSettings;
+  terminal: TerminalSettings;
   groups: Group[];
 }
 

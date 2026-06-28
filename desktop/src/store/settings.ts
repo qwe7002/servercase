@@ -5,6 +5,7 @@ import type {
   CloudSettings,
   GlobalSettings,
   Snippet,
+  TerminalSettings,
 } from '../../electron/shared';
 
 function uid(): string {
@@ -31,6 +32,13 @@ const DEFAULTS: GlobalSettings = {
     email: '',
     autoPush: false,
   },
+  terminal: {
+    fontSize: 13,
+    cursorBlink: true,
+    cursorStyle: 'block',
+    scrollback: 1000,
+    colorScheme: 'charcoal',
+  },
   groups: [],
 };
 
@@ -40,6 +48,7 @@ interface SettingsState {
   setBitwarden: (patch: Partial<BitwardenSettings>) => void;
   setBridge: (patch: Partial<GlobalSettings['bridge']>) => void;
   setCloud: (patch: Partial<CloudSettings>) => void;
+  setTerminal: (patch: Partial<TerminalSettings>) => void;
 
   addSnippet: (s: Omit<Snippet, 'id'>) => void;
   updateSnippet: (s: Snippet) => void;
@@ -77,6 +86,13 @@ export const useSettings = create<SettingsState>()(
           settings: {
             ...s.settings,
             cloud: { ...s.settings.cloud, ...patch },
+          },
+        })),
+      setTerminal: (patch) =>
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            terminal: { ...s.settings.terminal, ...patch },
           },
         })),
 
