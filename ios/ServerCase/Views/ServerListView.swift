@@ -73,7 +73,7 @@ struct ServerListView: View {
     }
 
     private var filtered: [ServerConfig] {
-        ServerListLayout.filtered(model.servers, query: searchText)
+        ServerListLayout.filtered(model.servers, groups: model.settings.groups, query: searchText)
     }
 
     private var showGroups: Bool { !model.settings.groups.isEmpty }
@@ -179,7 +179,7 @@ struct ServerSplitView: View {
     }
 
     private var filtered: [ServerConfig] {
-        ServerListLayout.filtered(model.servers, query: searchText)
+        ServerListLayout.filtered(model.servers, groups: model.settings.groups, query: searchText)
     }
 
     private var showGroups: Bool { !model.settings.groups.isEmpty }
@@ -202,14 +202,16 @@ private struct GroupSection: Identifiable {
 }
 
 private enum ServerListLayout {
-    static func filtered(_ servers: [ServerConfig], query: String) -> [ServerConfig] {
+    static func filtered(_ servers: [ServerConfig], groups: [ServerGroup], query: String) -> [ServerConfig] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return servers }
 
         return servers.filter { server in
-            server.name.localizedStandardContains(trimmed) ||
+            let groupName = groups.first { $0.id == server.groupId }?.name ?? ""
+            return server.name.localizedStandardContains(trimmed) ||
             server.host.localizedStandardContains(trimmed) ||
-            server.username.localizedStandardContains(trimmed)
+            server.username.localizedStandardContains(trimmed) ||
+            groupName.localizedStandardContains(trimmed)
         }
     }
 
@@ -250,6 +252,12 @@ private struct ServerRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let groupName {
+                    Label(groupName, systemImage: "folder")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
 
             Spacer()
@@ -259,6 +267,14 @@ private struct ServerRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+    }
+
+    private var groupName: String? {
+        guard let groupId = server.groupId,
+              let group = model.settings.groups.first(where: { $0.id == groupId }) else {
+            return nil
+        }
+        return group.name
     }
 }
 
