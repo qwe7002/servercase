@@ -82,10 +82,19 @@ The Xcode project is generated from `project.yml` with
 
 ```bash
 brew install xcodegen     # once
-cd clients/ios
+cd ios
 xcodegen generate         # produces ServerCase.xcodeproj (SPM: Citadel, Firebase…)
 open ServerCase.xcodeproj # build & run in Xcode (iOS 18+)
 ```
+
+`ServerCase.xcodeproj` is **generated and gitignored** — it is not tracked in
+git. `project.yml` globs the whole `ServerCase/` folder (`sources: - ServerCase`),
+so any `.swift` file there is picked up automatically — but only when the project
+is (re)generated. **Re-run `xcodegen generate` whenever files are added or
+removed** (e.g. after `git pull` brings in new sources), otherwise Xcode builds
+the stale project and reports `Cannot find '…' in scope` for the new types. If
+Xcode is open, let it reload the project after regenerating (or close and
+re-`open ServerCase.xcodeproj`).
 
 ## Push notifications (FCM)
 
