@@ -308,6 +308,11 @@ private struct CloudSettingsPage: View {
                         }
                         Button("Push to cloud") { push() }.disabled(busy)
                         Button("Pull from cloud") { pull() }.disabled(busy)
+                        NavigationLink {
+                            ProbeHostsPage(message: $message)
+                        } label: {
+                            Label("Probe hosts", systemImage: "dot.radiowaves.left.and.right")
+                        }
                         Toggle("Auto-push on changes", isOn: $draft.cloud.autoPush)
                         Button("Sign out", role: .destructive) { model.cloudSignOut() }
                         if let session = model.cloudSession, let at = session.syncedAt {
@@ -393,6 +398,153 @@ private struct CloudSettingsPage: View {
     }
 }
 
+private struct ProbeHostsPage: View {
+    @EnvironmentObject private var model: AppModel
+    @Binding var message: String?
+
+    @State private var name = ""
+    @State private var busy = false
+    @State private var selectedServerId: UUID?
+    @State private var newToken: NewProbeToken?
+    @State private var installLog = ""
+
+    var body: some View {
+        Form {
+            Section("Add host") {
+                TextField("Host name", text: $name)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Create probe") { create() }
+                    .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            if let newToken {
+                Section("Probe token for \(newToken.name)") {
+                    Text(newToken.token)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Button("Copy token") {
+                        UIPasteboard.general.string = newToken.token
+                    }
+
+                    Picker("Install on", selection: $selectedServerId) {
+                        Text("Choose server").tag(Optional<UUID>.none)
+                        ForEach(model.servers) { server in
+                            Text(server.name).tag(Optional(server.id))
+                        }
+                    }
+                    Button("Install on selected server") {
+                        install(newToken)
+                    }
+                    .disabled(busy || selectedServerId == nil)
+                } footer: {
+                    Text("The token is shown only once. Installation uses the selected server's SSH connection and installs a user-level probe service.")
+                }
+            }
+
+            Section("Hosts") {
+                if model.probeHosts.isEmpty {
+                    Text("No probe hosts yet.").foregroundStyle(.secondary)
+                }
+                ForEach(model.probeHosts) { host in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(host.name)
+                            Spacer()
+                            Circle()
+                                .fill(isOnline(host) ? Palette.good : Color.secondary.opacity(0.4))
+                                .frame(width: 8, height: 8)
+                        }
+                        if let snapshot = host.latest {
+                            Text("\(snapshot.hostname.isEmpty ? "–" : snapshot.hostname) · \(snapshot.kernel.isEmpty ? "–" : snapshot.kernel)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Waiting for first snapshot…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .onDelete(perform: delete)
+
+                Button("Refresh") {
+                    Task { await model.refreshProbes() }
+                }
+            }
+
+            if !installLog.isEmpty {
+                Section("Install log") {
+                    Text(installLog)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .navigationTitle("Probe hosts")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.refreshProbes() }
+    }
+
+    private func create() {
+        busy = true
+        message = nil
+        Task {
+            do {
+                let trimmed = name.trimmingCharacters(in: .whitespaces)
+                let result = try await model.createProbe(name: trimmed)
+                newToken = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
+                name = ""
+            } catch {
+                message = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func install(_ token: NewProbeToken) {
+        guard let id = selectedServerId,
+              let server = model.servers.first(where: { $0.id == id }) else { return }
+        busy = true
+        message = nil
+        installLog = ""
+        Task {
+            do {
+                installLog = try await model.installProbe(hostId: token.id, token: token.token, on: server)
+                newToken = nil
+                message = "Probe installed on \(server.name)."
+            } catch {
+                message = error.localizedDescription
+            }
+            busy = false
+        }
+    }
+
+    private func delete(_ offsets: IndexSet) {
+        for index in offsets {
+            let host = model.probeHosts[index]
+            Task {
+                do {
+                    try await model.deleteProbe(host)
+                } catch {
+                    message = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func isOnline(_ host: ProbeHost) -> Bool {
+        guard let lastSeenAt = host.lastSeenAt else { return false }
+        return Date().timeIntervalSince(lastSeenAt) < 30
+    }
+}
+
+private struct NewProbeToken: Identifiable {
+    var id: String
+    var name: String
+    var token: String
+}
+
 private struct TerminalSettingsPage: View {
     @Binding var draft: GlobalSettings
 
@@ -456,4 +608,3 @@ struct SnippetEditorView: View {
         }
     }
 }
-

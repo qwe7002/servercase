@@ -15,6 +15,8 @@ struct ServerConfig: Identifiable, Codable, Equatable, Hashable {
     var username: String = "root"
     /// Id of the `Group` this server belongs to, if any.
     var groupId: String? = nil
+    /// Cloud probe host id to use for overview status instead of SSH polling.
+    var probeHostId: String? = nil
     var authType: AuthType = .password
     var password: String? = nil
     /// PEM private key text when `authType == .key`.

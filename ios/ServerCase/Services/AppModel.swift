@@ -12,6 +12,7 @@ final class AppModel: ObservableObject {
     @Published var settings: GlobalSettings = SettingsStore.load()
     @Published var bitwardenStatus: BitwardenStatus?
     @Published var cloudSession: CloudSession? = CloudSessionStore.load()
+    @Published var probeHosts: [ProbeHost] = []
 
     let vault = BitwardenVault()
     private let cloud = CloudService()
@@ -124,10 +125,45 @@ final class AppModel: ObservableObject {
 
     func service(_ id: UUID) -> SSHService? { services[id] }
 
+    private func connectedService(for server: ServerConfig) async throws -> SSHService {
+        if let service = services[server.id], await service.isConnected {
+            return service
+        }
+
+        var cfg = server
+        if vaultEnabled, server.password == nil, server.privateKey == nil,
+           let secrets = try? await vault.getSecrets(server.id.uuidString) {
+            cfg = server.merging(secrets)
+        }
+
+        let service = SSHService(config: cfg)
+        services[server.id] = service
+        collectors[server.id] = StatusParser.CollectorState()
+        connState[server.id] = .connecting
+        do {
+            try await service.connect()
+            connState[server.id] = .connected
+            return service
+        } catch {
+            services[server.id] = nil
+            connState[server.id] = .error(error.localizedDescription)
+            throw error
+        }
+    }
+
     // MARK: Status polling
 
     func startPolling(_ id: UUID) {
         pollTask?.cancel()
+        if servers.first(where: { $0.id == id })?.probeHostId != nil {
+            pollTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refreshProbes()
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                }
+            }
+            return
+        }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.pollOnce(id)
@@ -224,6 +260,7 @@ final class AppModel: ObservableObject {
         next.cloud.email = result.user.email
         updateSettings(next)
         registerPushToken()
+        await refreshProbes()
     }
 
     /// Registers the current FCM token with the worker once signed in (idempotent).
@@ -269,7 +306,61 @@ final class AppModel: ObservableObject {
 
     func cloudSignOut() {
         cloudSession = nil
+        probeHosts = []
         CloudSessionStore.save(nil)
+    }
+
+    // MARK: Probe hosts
+
+    func probeHost(for server: ServerConfig) -> ProbeHost? {
+        guard let id = server.probeHostId else { return nil }
+        return probeHosts.first { $0.id == id }
+    }
+
+    func probeStatus(for server: ServerConfig) -> ServerStatus? {
+        probeHost(for: server)?.latest?.serverStatus
+    }
+
+    func refreshProbes() async {
+        guard settings.cloud.enabled, !settings.cloud.url.isEmpty,
+              let session = cloudSession, session.isValid else { return }
+        do {
+            probeHosts = try await cloud.listProbes(url: settings.cloud.url, token: session.token).hosts
+        } catch {
+            // Best-effort; the settings page surfaces explicit create/delete errors.
+        }
+    }
+
+    func createProbe(name: String) async throws -> ProbeCreateResult {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
+        let result = try await cloud.createProbe(url: settings.cloud.url, token: session.token, name: name)
+        await refreshProbes()
+        return result
+    }
+
+    func deleteProbe(_ host: ProbeHost) async throws {
+        guard let session = cloudSession, session.isValid else {
+            throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
+        }
+        try await cloud.deleteProbe(url: settings.cloud.url, token: session.token, id: host.id)
+        probeHosts.removeAll { $0.id == host.id }
+        for i in servers.indices where servers[i].probeHostId == host.id {
+            servers[i].probeHostId = nil
+        }
+        saveServers()
+    }
+
+    func installProbe(hostId: String, token: String, on server: ServerConfig) async throws -> String {
+        let service = try await connectedService(for: server)
+        let output = try await service.run(probeInstallCommand(apiURL: settings.cloud.url, token: token))
+        if let index = servers.firstIndex(where: { $0.id == server.id }) {
+            servers[index].probeHostId = hostId
+            saveServers()
+        }
+        await refreshProbes()
+        return output
     }
 
     private func updateCloudSyncState(_ session: CloudSession, version: Int, at: Date) {
@@ -292,4 +383,21 @@ final class AppModel: ObservableObject {
             try? await self.cloudPushNow()
         }
     }
+}
+
+private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh"
+
+private func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+private func probeInstallCommand(apiURL: String, token: String) -> String {
+    [
+        "set -e",
+        "tmp=\"$(mktemp)\"",
+        "if command -v curl >/dev/null 2>&1; then curl -fsSL \(shellQuote(probeInstallScriptURL)) -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \(shellQuote(probeInstallScriptURL)); else echo \"need curl or wget\"; exit 1; fi",
+        "chmod 700 \"$tmp\"",
+        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --interval 10 --public-ip",
+        "rm -f \"$tmp\"",
+    ].joined(separator: "; ")
 }

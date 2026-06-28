@@ -145,6 +145,24 @@ struct CloudService {
         try await send(path: "/sync", baseURL: url, method: "GET", token: token, body: Optional<EmptyRequest>.none)
     }
 
+    func listProbes(url: String, token: String) async throws -> ProbeListResult {
+        try await send(path: "/probes", baseURL: url, method: "GET", token: token, body: Optional<EmptyRequest>.none)
+    }
+
+    func createProbe(url: String, token: String, name: String) async throws -> ProbeCreateResult {
+        try await send(path: "/probes", baseURL: url, method: "POST", token: token, body: ProbeCreateRequest(name: name))
+    }
+
+    func deleteProbe(url: String, token: String, id: String) async throws {
+        let _: EmptyResponse = try await send(
+            path: "/probes/\(id)",
+            baseURL: url,
+            method: "DELETE",
+            token: token,
+            body: Optional<EmptyRequest>.none
+        )
+    }
+
     private func send<RequestBody: Encodable, ResponseBody: Decodable>(
         path: String,
         baseURL: String,
@@ -202,6 +220,10 @@ private struct DeviceRequest: Encodable {
 private struct PutSyncRequest: Encodable {
     var baseVersion: Int?
     var payload: SyncPayload
+}
+
+private struct ProbeCreateRequest: Encodable {
+    var name: String
 }
 
 private struct EmptyRequest: Encodable {}
