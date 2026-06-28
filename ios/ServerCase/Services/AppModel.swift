@@ -445,6 +445,16 @@ final class AppModel: ObservableObject {
         saveServers()
     }
 
+    /// One-tap install for a server's Overview: creates a cloud probe named
+    /// after the host, installs it over SSH, links it, and returns the install
+    /// log. Mirrors the desktop dashboard's "Install probe" button.
+    @discardableResult
+    func installProbeAuto(on server: ServerConfig) async throws -> String {
+        let host = server.host.trimmingCharacters(in: .whitespaces)
+        let result = try await createProbe(name: host.isEmpty ? server.name : host)
+        return try await installProbe(hostId: result.host.id, token: result.token, on: server)
+    }
+
     func installProbe(hostId: String, token: String, on server: ServerConfig) async throws -> String {
         let service = try await connectedService(for: server)
         let output = try await service.run(probeInstallCommand(apiURL: settings.cloud.url, token: token, hostName: server.host))

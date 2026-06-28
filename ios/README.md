@@ -13,6 +13,13 @@ over SwiftNIO).
   snippet menu and **multiple tabs** per server
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download) over the live connection
+- **Proxy browser** — an in-app `WKWebView` whose traffic exits from the server.
+  A loopback SOCKS5 proxy (`SSHProxyServer`) forwards each request over an SSH
+  `direct-tcpip` channel; the web view is pointed at it with a SOCKSv5
+  `ProxyConfiguration` (iOS 17+), so pages load — and DNS resolves — server-side.
+- **One-tap probe install** on a server's Overview: creates a cloud probe named
+  after the host, installs it over SSH, and links it (mirrors the desktop
+  dashboard). Probe hosts can still be managed in Settings.
 - **Adaptive layout** — a single navigation stack on iPhone and a
   sidebar + detail split view on iPad (`NavigationSplitView`), which also
   unlocks landscape on iPad
@@ -40,7 +47,9 @@ Models/
   Settings.swift          GlobalSettings / Snippet / Cloud / Bitwarden models
   StatusParser.swift      statusCommand + /proc parsing, CPU/net deltas
 Services/
-  SSHService.swift        Citadel connection (actor): exec + raw PTY streams
+  SSHService.swift        Citadel connection (actor): exec + raw PTY streams + tunnels
+  SSHTunnel.swift         direct-tcpip channel ↔ byte-stream bridge (NIOSSH handlers)
+  SSHProxyServer.swift    loopback SOCKS5 proxy backing the proxy browser
   RemoteFiles.swift       command-based SFTP-style file operations
   BitwardenVault.swift    clean-room Bitwarden client (CommonCrypto + CryptoKit)
   SettingsStore.swift     UserDefaults settings persistence
@@ -56,7 +65,7 @@ Views/
   ServerSplitView         iPad sidebar + detail (NavigationSplitView)
   ServerListSupport.swift shared filtering/grouping + ServerRow + row actions
   ServerFormView / DashboardView / TerminalView
-  SettingsView / FilesView
+  SettingsView / FilesView / ProxyBrowserView
   Components/Indicators.swift  GaugeView + UsageBarView + StatusDot
   Format.swift            byte/rate/uptime formatting + palette
 ServerCaseApp.swift       @main App entry
