@@ -147,38 +147,33 @@ Durable Object (hibernating) that the ingest paths publish into. Messages:
 | `POST`   | `/v1/ingest` | probe token | Upload one `servercase.probe.v1` snapshot over HTTP. |
 | `GET`    | `/v1/ingest/ws` | probe token | **WebSocket**: stream one snapshot per text frame. |
 
-**WebSocket ingest (preferred).** The probe holds a single connection and sends
-one `servercase.probe.v1` line per text frame. It is backed by a
+**HTTP ingest (default).** Installed probes `POST` one `servercase.probe.v1`
+snapshot per request to `/v1/ingest`, authenticated by the per-host token in the
+`Authorization` header (or `?token=`). This needs only `curl` on the host — no
+extra binary — so it is what [`probe/deploy/install.sh`](../probe/deploy)
+configures:
+
+```sh
+servercase-probe --interval 10 | while IFS= read -r line; do
+  printf %s "$line" | curl -fsS -X POST https://<your-worker>/v1/ingest \
+    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+    --data-binary @- >/dev/null
+done
+```
+
+**WebSocket ingest (alternative).** The probe can instead hold a single
+connection and send one snapshot per text frame to `/v1/ingest/ws`, backed by a
 `ProbeSocket` Durable Object — one instance per host — using the WebSocket
 [Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/),
-so idle connections cost nothing and pings are auto-answered. The token is sent
-in the `Authorization` header (or `?token=` for clients that can't set headers).
+so idle connections cost nothing and pings are auto-answered. Point the service's
+`ExecStart` at a WebSocket client such as `websocat` to use it.
 
 To keep D1 writes low, the DO buffers samples in its own (hibernation-safe)
 storage and flushes them to D1 in **one batch per `PROBE_FLUSH_SECONDS`** (one
 `latest` update + one multi-row history insert + one trim) rather than writing
 every sample. Live fan-out and alert evaluation still happen on every frame, so
-the panel and push stay instant. The HTTP `POST /v1/ingest` fallback writes per
+the panel and push stay instant. The HTTP `POST /v1/ingest` path writes per
 request.
-
-Don't hand-roll a client: deploy the agent with [`probe/deploy/install.sh`](../probe/deploy),
-which streams the probe's stdout through `websocat`:
-
-```sh
-servercase-probe --interval 10 \
-  | websocat --ping-interval 25 -H "Authorization: Bearer $TOKEN" \
-      wss://<your-worker>/v1/ingest/ws
-```
-
-**HTTP fallback.** Where WebSockets are blocked, post each line instead:
-
-```sh
-servercase-probe --interval 10 | while read -r line; do
-  curl -fsS -X POST https://<your-worker>/v1/ingest \
-    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
-    -d "$line" >/dev/null
-done
-```
 
 ### Push notifications (FCM)
 
