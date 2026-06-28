@@ -401,15 +401,6 @@ private struct TerminalSettingsPage: View {
             Section("Text") {
                 Stepper("Font size: \(draft.terminal.fontSize) pt",
                         value: $draft.terminal.fontSize, in: 8...32)
-                Stepper("Scrollback: \(draft.terminal.scrollback) lines",
-                        value: $draft.terminal.scrollback, in: 100...100_000, step: 100)
-            }
-
-            Section("Cursor") {
-                Picker("Style", selection: $draft.terminal.cursorStyle) {
-                    ForEach(TerminalCursorStyle.allCases) { Text($0.label).tag($0) }
-                }
-                Toggle("Blink", isOn: $draft.terminal.cursorBlink)
             }
 
             Section {
