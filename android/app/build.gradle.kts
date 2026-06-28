@@ -15,12 +15,13 @@ if (file("google-services.json").exists()) {
 
 android {
     namespace = "com.servercase.app"
-    compileSdk = 35
+    // termlib's transitive deps (androidx.core 1.18+) require compileSdk 36.
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.servercase.app"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
         vectorDrawables { useSupportLibrary = true }
@@ -68,5 +69,6 @@ dependencies {
     implementation(libs.bouncycastle)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.termlib)
     debugImplementation(libs.androidx.ui.tooling)
 }

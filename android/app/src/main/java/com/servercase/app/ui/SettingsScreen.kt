@@ -312,16 +312,9 @@ private fun TerminalSection(settings: GlobalSettings, onUpdate: (GlobalSettings)
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
-        OutlinedTextField(
-            value = t.scrollback.toString(),
-            onValueChange = {
-                val n = it.toIntOrNull() ?: 1000
-                onUpdate(settings.copy(terminal = t.copy(scrollback = n.coerceIn(100, 100_000))))
-            },
-            label = { Text("Scrollback (lines)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        )
+        // Scrollback is intentionally not exposed here: the termlib emulator
+        // manages its own scrollback buffer. The field stays in the synced
+        // model for the desktop/iOS clients.
         Text("Color scheme", style = MaterialTheme.typography.labelMedium)
         val schemes = TerminalColorScheme.entries
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {

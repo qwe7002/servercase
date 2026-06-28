@@ -13,12 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
@@ -28,7 +24,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -45,27 +40,37 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.servercase.app.data.Snippet
 import com.servercase.app.data.TerminalSettings
 import com.servercase.app.data.ssh.SshClient
 import kotlinx.coroutines.flow.Flow
+import org.connectbot.terminal.Terminal
+import org.connectbot.terminal.TerminalEmulator
+import org.connectbot.terminal.TerminalEmulatorFactory
 import java.util.UUID
-
-private val ANSI = Regex("\\[[0-9;?]*[ -/]*[@-~]")
 
 /** Parses a 6-digit RGB hex string (e.g. "0b0d12") into a Compose Color. */
 private fun colorFromHex(hex: String): Color = Color(android.graphics.Color.parseColor("#$hex"))
 
-/** One terminal tab: its own SSH shell channel and accumulated output. */
-private class TerminalTab {
+/**
+ * One terminal tab: a real VT emulator (termlib / libvterm) plus its SSH shell
+ * channel. The emulator processes the shell's output bytes; its keyboard output
+ * is written back to the shell.
+ */
+private class TermTab(foreground: Color, background: Color) {
     val id: String = UUID.randomUUID().toString()
     var handle by mutableStateOf<SshClient.ShellHandle?>(null)
-    var flow by mutableStateOf<Flow<String>?>(null)
-    var output by mutableStateOf("")
+    var flow by mutableStateOf<Flow<ByteArray>?>(null)
+    val emulator: TerminalEmulator =
+        TerminalEmulatorFactory.create(
+            initialRows = 40,
+            initialCols = 100,
+            defaultForeground = foreground,
+            defaultBackground = background,
+            onKeyboardInput = { data -> handle?.write(data) },
+        )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -76,21 +81,18 @@ fun TerminalScreen(
     terminal: TerminalSettings = TerminalSettings(),
     onBack: () -> Unit,
 ) {
-    val tabs = remember { mutableStateListOf(TerminalTab()) }
-    var activeId by remember { mutableStateOf(tabs.first().id) }
-    var input by remember { mutableStateOf("") }
-    var snippetMenu by remember { mutableStateOf(false) }
-    val scroll = rememberScrollState()
-
-    val maxChars = (terminal.scrollback * 200).coerceAtLeast(4_000)
     val background = colorFromHex(terminal.colorScheme.backgroundHex)
     val foreground = colorFromHex(terminal.colorScheme.foregroundHex)
 
-    // Drive every tab (even hidden ones) so background shells stay alive.
-    tabs.forEach { tab -> key(tab.id) { TerminalTabDriver(tab, client, maxChars) } }
+    val tabs = remember { mutableStateListOf(TermTab(foreground, background)) }
+    var activeId by remember { mutableStateOf(tabs.first().id) }
+    var snippetMenu by remember { mutableStateOf(false) }
+
+    // Drive every tab (even hidden ones) so background shells keep feeding their
+    // emulator; only the active tab's view is composed.
+    tabs.forEach { tab -> key(tab.id) { TermTabDriver(tab, client) } }
 
     val active = tabs.firstOrNull { it.id == activeId } ?: tabs.first()
-    LaunchedEffect(active.output) { scroll.scrollTo(scroll.maxValue) }
 
     Scaffold(
         topBar = {
@@ -112,7 +114,7 @@ fun TerminalScreen(
                                     text = { Text(snippet.name) },
                                     onClick = {
                                         snippetMenu = false
-                                        active.handle?.write(snippet.command + "\n")
+                                        active.handle?.write((snippet.command + "\n").toByteArray())
                                     },
                                 )
                             }
@@ -135,51 +137,29 @@ fun TerminalScreen(
                     }
                 },
                 onAdd = {
-                    val tab = TerminalTab()
+                    val tab = TermTab(foreground, background)
                     tabs.add(tab)
                     activeId = tab.id
                 },
             )
-            Text(
-                text = active.output,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .background(background)
-                    .verticalScroll(scroll)
-                    .padding(12.dp),
-                fontFamily = FontFamily.Monospace,
-                fontSize = terminal.fontSize.sp,
-                color = foreground,
+            Terminal(
+                terminalEmulator = active.emulator,
+                modifier = Modifier.weight(1f).fillMaxWidth().background(background),
+                initialFontSize = terminal.fontSize.sp,
+                backgroundColor = background,
+                foregroundColor = foreground,
+                keyboardEnabled = true,
             )
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("command") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        active.handle?.write(input + "\n"); input = ""
-                    }),
-                )
-                IconButton(onClick = { active.handle?.write(input + "\n"); input = "" }) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                }
-            }
         }
     }
 }
 
-/** Opens the tab's shell (kept open while composed) and streams its output. */
+/** Opens the tab's shell (kept open while composed) and feeds it to the emulator. */
 @Composable
-private fun TerminalTabDriver(tab: TerminalTab, client: SshClient?, maxChars: Int) {
+private fun TermTabDriver(tab: TermTab, client: SshClient?) {
     DisposableEffect(Unit) {
         if (client != null && client.isConnected && tab.handle == null) {
-            val (handle, flow) = client.openShell(cols = 120, rows = 32)
+            val (handle, flow) = client.openShellBytes(cols = 100, rows = 40)
             tab.handle = handle
             tab.flow = flow
         }
@@ -187,10 +167,7 @@ private fun TerminalTabDriver(tab: TerminalTab, client: SshClient?, maxChars: In
     }
     val flow = tab.flow
     LaunchedEffect(flow) {
-        flow?.collect { chunk ->
-            // Keep roughly `scrollback` lines; strip ANSI control sequences.
-            tab.output = (tab.output + chunk.replace(ANSI, "")).takeLast(maxChars)
-        }
+        flow?.collect { bytes -> tab.emulator.writeInput(bytes) }
     }
 }
 

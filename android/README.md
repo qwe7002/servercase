@@ -8,8 +8,9 @@ Jetpack Compose, Material 3 and SSHJ.
 - Add / edit / delete servers (password or private-key auth)
 - Live status dashboard: CPU%, memory, swap, per-mount disks, network
   throughput, load average and uptime — parsed from `/proc` + `df`
-- Interactive SSH shell (line-oriented terminal) with a snippet menu and
-  **multiple tabs** per server
+- Interactive SSH terminal — a real VT/ANSI emulator (ConnectBot's
+  [`termlib`](https://github.com/connectbot/termlib), libvterm under the hood)
+  with a snippet menu and **multiple tabs** per server
 - Remote file manager (browse, view/edit text, mkdir, rename, delete,
   upload/download via SAF) over the live connection
 - **Global settings** (gear in the server list):
@@ -20,8 +21,10 @@ Jetpack Compose, Material 3 and SSHJ.
     latter via BouncyCastle). When off, secrets stay on-device and are never
     written to the sync file.
   - **Snippets** — reusable terminal commands.
-  - **Terminal** — font size, scrollback and color scheme for the SSH terminal
-    (synced across devices via Cloud).
+  - **Terminal** — font size and color scheme for the SSH terminal
+    (synced across devices via Cloud). The `scrollback` field is still synced
+    for the other clients but is a no-op on Android: `termlib` manages its own
+    scrollback buffer.
   - **Cloud** — sign in to a [ServerCase Worker](../worker) and push/pull your
     secret-free config across devices (optionally auto-pushing on change). The
     session token stays on-device and is never written to the synced payload.
@@ -40,7 +43,8 @@ data/
   CloudClient.kt          ServerCase Worker REST client (auth + sync)
   CloudSession.kt         local-only worker session token (DataStore)
   bitwarden/BitwardenVault.kt  clean-room Bitwarden client (javax.crypto)
-  ssh/SshClient.kt        SSHJ connection: exec (status) + shell (terminal)
+  ssh/SshClient.kt        SSHJ connection: exec (status) + openShellBytes (raw
+                          PTY byte stream feeding the termlib emulator)
   ssh/RemoteFiles.kt      command-based SFTP-style file operations
 vm/ServersViewModel.kt    StateFlow UiState, connections, vault, polling, cloud
 ui/
@@ -59,6 +63,15 @@ Requires the Android SDK (set `sdk.dir` in `local.properties` or `ANDROID_HOME`)
 ./gradlew assembleDebug      # debug APK
 ./gradlew installDebug       # install on a connected device/emulator
 ```
+
+> **Toolchain:** `termlib` is published against a recent toolchain, so this
+> module tracks it — Kotlin 2.3.21, Compose BOM 2026.05.01, AGP 8.13, and
+> `compileSdk`/`targetSdk` 36.
+>
+> **Terminal caveat:** SSHJ has no convenient PTY-resize call, so the shell is
+> allocated at a fixed 100×40 and the emulator auto-fits the view. Full-screen
+> TUI apps (htop, vim) render correctly but may not track live window-size
+> changes.
 
 ## Push notifications (FCM)
 
