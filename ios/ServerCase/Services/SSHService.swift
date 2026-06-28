@@ -159,27 +159,7 @@ actor SSHService {
     }
 }
 
-private let loginShellBootstrapCommand = """
-motd_shown=0
-if [ -r /run/motd.dynamic ]; then
-    cat /run/motd.dynamic
-    motd_shown=1
-elif command -v run-parts >/dev/null 2>&1 && [ -d /etc/update-motd.d ]; then
-    run-parts /etc/update-motd.d 2>/dev/null
-    motd_shown=1
-elif [ -r /etc/motd ]; then
-    cat /etc/motd
-    motd_shown=1
-fi
-if [ "$motd_shown" = 1 ]; then
-    printf '\\r\\n'
-fi
-shell=${SHELL:-/bin/sh}
-case "$shell" in
-    */bash|*/zsh|*/ksh|*/fish) exec "$shell" -l ;;
-    *) exec "$shell" ;;
-esac
-"""
+private let loginShellBootstrapCommand = "motd_shown=0; if [ -r /run/motd.dynamic ]; then cat /run/motd.dynamic; motd_shown=1; elif command -v run-parts >/dev/null 2>&1 && [ -d /etc/update-motd.d ]; then run-parts /etc/update-motd.d 2>/dev/null; motd_shown=1; elif [ -r /etc/motd ]; then cat /etc/motd; motd_shown=1; fi; if [ \"$motd_shown\" = 1 ]; then printf '\\r\\n'; fi; shell=${SHELL:-/bin/sh}; case \"$shell\" in */bash|*/zsh|*/ksh|*/fish) stty echo 2>/dev/null; exec \"$shell\" -l ;; *) stty echo 2>/dev/null; exec \"$shell\" ;; esac"
 
 private func terminalData(from buffer: ByteBuffer) -> Data? {
     guard let bytes = buffer.getBytes(at: buffer.readerIndex, length: buffer.readableBytes) else {

@@ -2,6 +2,126 @@ import GameController
 import SwiftTerm
 import SwiftUI
 
+struct TerminalTabsView: View {
+    let server: ServerConfig
+
+    @State private var tabs: [TerminalTab] = [TerminalTab(index: 1)]
+    @State private var selectedTabID: UUID?
+    @State private var nextTabIndex = 2
+
+    var body: some View {
+        VStack(spacing: 0) {
+            tabBar
+            Divider()
+            ZStack {
+                ForEach(tabs) { tab in
+                    TerminalView(server: server, isActive: tab.id == activeTabID)
+                        .opacity(tab.id == activeTabID ? 1 : 0)
+                        .allowsHitTesting(tab.id == activeTabID)
+                        .accessibilityHidden(tab.id != activeTabID)
+                }
+            }
+        }
+        .navigationTitle("Terminal")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if selectedTabID == nil {
+                selectedTabID = tabs.first?.id
+            }
+        }
+    }
+
+    private var activeTabID: UUID? {
+        if let selectedTabID, tabs.contains(where: { $0.id == selectedTabID }) {
+            return selectedTabID
+        }
+        return tabs.first?.id
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(tabs) { tab in
+                        tabButton(tab)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+
+            Button(action: addTab) {
+                Image(systemName: "plus")
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("New terminal tab")
+            .padding(.trailing, 8)
+        }
+        .background(Color(.systemBackground))
+    }
+
+    private func tabButton(_ tab: TerminalTab) -> some View {
+        let isSelected = tab.id == activeTabID
+
+        return HStack(spacing: 6) {
+            Button {
+                selectedTabID = tab.id
+            } label: {
+                Label(tab.title, systemImage: "terminal")
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+
+            if tabs.count > 1 {
+                Button {
+                    closeTab(tab)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .imageScale(.small)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close \(tab.title)")
+            }
+        }
+        .font(.caption.weight(isSelected ? .semibold : .regular))
+        .foregroundStyle(isSelected ? .primary : .secondary)
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(isSelected ? Color(.secondarySystemBackground) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func addTab() {
+        let tab = TerminalTab(index: nextTabIndex)
+        nextTabIndex += 1
+        tabs.append(tab)
+        selectedTabID = tab.id
+    }
+
+    private func closeTab(_ tab: TerminalTab) {
+        guard tabs.count > 1,
+              let index = tabs.firstIndex(where: { $0.id == tab.id }) else {
+            return
+        }
+
+        tabs.remove(at: index)
+        if selectedTabID == tab.id {
+            let replacementIndex = min(index, tabs.count - 1)
+            selectedTabID = tabs[replacementIndex].id
+        }
+    }
+}
+
+private struct TerminalTab: Identifiable, Equatable {
+    let id = UUID()
+    let index: Int
+
+    var title: String {
+        "Terminal \(index)"
+    }
+}
+
 /// A native terminal emulator backed by SwiftTerm. SSH bytes are bridged
 /// directly into the emulator, so ANSI/VT control sequences, cursor movement,
 /// alternate screens, selection, and keyboard input are handled by SwiftTerm
@@ -154,7 +274,7 @@ private struct SwiftTermTerminalView: UIViewRepresentable {
                 DispatchQueue.main.async { _ = uiView.becomeFirstResponder() }
             }
         } else if uiView.isFirstResponder {
-            uiView.resignFirstResponder()
+            _ = uiView.resignFirstResponder()
         }
         bridge.attach(context.coordinator)
     }
