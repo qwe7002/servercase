@@ -43,7 +43,7 @@ for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on `v*` tags.
 The deployment script can download those assets automatically:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh \
+curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/refs/heads/main/probe/deploy/install.sh \
   | bash -s -- --api https://worker.example.com --token scp_xxx
 ```
 

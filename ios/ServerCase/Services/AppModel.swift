@@ -496,7 +496,7 @@ final class AppModel: ObservableObject {
     }
 }
 
-private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh"
+private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/refs/heads/main/probe/deploy/install.sh"
 
 private func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"

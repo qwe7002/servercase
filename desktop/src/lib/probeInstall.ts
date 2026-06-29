@@ -1,5 +1,5 @@
 const INSTALL_SCRIPT_URL =
-  'https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh';
+  'https://raw.githubusercontent.com/qwe7002/servercase/refs/heads/main/probe/deploy/install.sh';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
