@@ -150,7 +150,7 @@ Durable Object (hibernating) that the ingest paths publish into. Messages:
 **HTTP ingest (default).** Installed probes `POST` one `servercase.probe.v1`
 snapshot per request to `/v1/ingest`, authenticated by the per-host token in the
 `Authorization` header (or `?token=`). This needs only `curl` on the host — no
-extra binary — so it is what [`probe/deploy/install.sh`](../probe/deploy)
+extra binary — so it is what [`servercase-probe install`](../probe/deploy)
 configures:
 
 ```sh

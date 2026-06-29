@@ -496,19 +496,25 @@ final class AppModel: ObservableObject {
     }
 }
 
-private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/refs/heads/main/probe/deploy/install.sh"
+private let probeReleaseBase = "https://github.com/qwe7002/servercase/releases/latest/download/servercase-probe"
 
 private func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
+// Download the matching `servercase-probe` release binary and let it install
+// itself as a per-user systemd service (the binary now carries the installer —
+// there is no separate install.sh to fetch).
 private func probeInstallCommand(apiURL: String, token: String, hostName: String) -> String {
     [
         "set -e",
+        "arch=\"$(uname -m)\"",
+        "case \"$arch\" in x86_64|amd64) target=x86_64-unknown-linux-gnu ;; aarch64|arm64) target=aarch64-unknown-linux-gnu ;; *) echo \"unsupported architecture: $arch\" >&2; exit 1 ;; esac",
+        "url=\(shellQuote(probeReleaseBase))-\"$target\"",
         "tmp=\"$(mktemp)\"",
-        "if command -v curl >/dev/null 2>&1; then curl -fsSL \(shellQuote(probeInstallScriptURL)) -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \(shellQuote(probeInstallScriptURL)); else echo \"need curl or wget\"; exit 1; fi",
+        "if command -v curl >/dev/null 2>&1; then curl -fsSL \"$url\" -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \"$url\"; else echo \"need curl or wget\" >&2; exit 1; fi",
         "chmod 700 \"$tmp\"",
-        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip --security-updates",
+        "\"$tmp\" install --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip --security-updates",
         "rm -f \"$tmp\"",
     ].joined(separator: "; ")
 }

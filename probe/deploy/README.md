@@ -1,8 +1,9 @@
 # Probe deployment
 
-Automated install of the [`servercase-probe`](..) agent on a Linux host,
-posting `servercase.probe.v1` snapshots to the [`worker`](../../worker) over
-HTTPS.
+The [`servercase-probe`](..) binary installs itself on a Linux host, posting
+`servercase.probe.v1` snapshots to the [`worker`](../../worker) over HTTPS. There
+is no separate install script — the installer lives inside the binary
+(`servercase-probe install`).
 
 ```
 servercase-probe (stdout JSON) ──│ pipe │──> curl ──POST──> /v1/ingest
@@ -18,25 +19,36 @@ service.
 
 ## One command
 
+Get the binary (download the matching release asset or build from this repo with
+`cargo build --release`), then run its `install` subcommand.
+
 Already have a probe token (from the app or `POST /v1/probes`):
 
 ```bash
-./install.sh --api https://worker.example.com --token scp_xxxxx
+servercase-probe install --api https://worker.example.com --token scp_xxxxx
 ```
 
 Or auto-register this host with your account (mints a token for you):
 
 ```bash
-./install.sh \
+servercase-probe install \
   --api https://worker.example.com \
   --session <your login token> \
   --name "$(hostname)" \
   --interval 10 --public-ip --security-updates
 ```
 
-Run straight from a checkout (builds the probe with `cargo` when available), or
-pipe the hosted installer. Without a local build or `--probe-url`, the script
-downloads the matching Linux binary from GitHub Releases.
+`install` copies the running binary into place, writes the config, and enables
+the systemd service. Re-running it upgrades in place.
+
+To download the release binary first:
+
+```bash
+target=x86_64-unknown-linux-gnu   # or aarch64-unknown-linux-gnu
+curl -fsSL "https://github.com/qwe7002/servercase/releases/latest/download/servercase-probe-$target" -o servercase-probe
+chmod +x servercase-probe
+./servercase-probe install --api https://worker.example.com --token scp_xxxxx
+```
 
 ## Flags
 
@@ -50,21 +62,20 @@ downloads the matching Linux binary from GitHub Releases.
 | `--interval <secs>` | Snapshot interval (default `10`). |
 | `--public-ip` | Also look up the host's public IP. |
 | `--security-updates` | Also check whether cached package-manager metadata reports pending security updates (apt/dnf/yum; cached by the probe). |
-| `--probe-path <file>` / `--probe-url <url>` | Use a prebuilt probe binary instead of building. |
-| `--build <dir>` | Cargo source dir to build from (default: repo `probe/`). |
-| `--github-repo <owner/repo>` | Release repo for automatic probe downloads (default `qwe7002/servercase`, or `$SERVERCASE_GITHUB_REPO`). |
-| `--probe-version <tag>` | Release tag to download (default `latest`, or `$SERVERCASE_PROBE_VERSION`). |
 | `--system` / `--user-service` | Force system-wide or per-user service mode (default auto: root = system, non-root = user). |
 | `--prefix <dir>` / `--conf-dir <dir>` | Install/config directories. Defaults are `/opt/servercase-probe` + `/etc/servercase-probe` in system mode, or `~/.local/lib/servercase-probe` + `~/.config/servercase-probe` in user mode. |
 | `--user <name>` | Service user for system mode (default `servercase`). |
-| `--uninstall` | Stop, disable and remove the service and files. |
+
+Run `servercase-probe install --help` for the full list. Use
+`servercase-probe uninstall` (with the same `--system` / `--user-service`
+selection) to stop, disable and remove the service and files.
 
 ## What it installs
 
-- User mode: binaries in `~/.local/lib/servercase-probe/`, config in
+- User mode: binary in `~/.local/lib/servercase-probe/`, config in
   `~/.config/servercase-probe/probe.env`, unit in
   `~/.config/systemd/user/servercase-probe.service`.
-- System mode: binaries in `/opt/servercase-probe/`, config in
+- System mode: binary in `/opt/servercase-probe/`, config in
   `/etc/servercase-probe/probe.env`, unit in
   `/etc/systemd/system/servercase-probe.service`.
 
@@ -73,10 +84,10 @@ downloads the matching Linux binary from GitHub Releases.
 ```bash
 systemctl --user status servercase-probe
 journalctl --user -u servercase-probe -f
-./install.sh --uninstall
+servercase-probe uninstall --user-service
 ```
 
-For a system-wide service, run the script as root or pass `--system`, then use
+For a system-wide service, run `install` as root or pass `--system`, then use
 plain `systemctl` / `journalctl -u`.
 
 ## Transport
@@ -84,4 +95,5 @@ plain `systemctl` / `journalctl -u`.
 The service posts each snapshot to `POST /v1/ingest` with a per-host bearer
 token. The worker also still accepts a streaming WebSocket at `/v1/ingest/ws`
 (see the [worker README](../../worker/README.md)); to use that instead, point
-the service's `ExecStart` at a WebSocket client such as `websocat`.
+the service's `ExecStart` at a WebSocket client such as `websocat` — see the
+reference unit in [`servercase-probe.service`](servercase-probe.service).

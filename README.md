@@ -39,11 +39,11 @@ tokens, devices). Secrets stay in ServerCase: the worker stores only secret-free
 server definitions, and the Bitwarden API key is redacted before upload. See its
 [README](worker/README.md).
 
-The [`probe/deploy/`](probe/deploy) package automates putting a probe on a host: a single
-`install.sh` fetches the agent, optionally registers the host to mint its token,
-and installs a hardened `systemd` service that `POST`s snapshots to the worker
-over HTTPS with `curl` (no `websocat` needed) and restarts on drop. See its
-[README](probe/deploy/README.md).
+Putting a probe on a host is built into the agent: `servercase-probe install`
+optionally registers the host to mint its token, then installs a hardened
+`systemd` service that `POST`s snapshots to the worker over HTTPS with `curl`
+(no `websocat` needed) and restarts on drop. See [`probe/deploy/`](probe/deploy)
+for the deployment [README](probe/deploy/README.md).
 
 ## Shared design
 

@@ -1,5 +1,8 @@
 # Reference systemd unit for streaming the probe over a WebSocket.
-# install.sh generates this for you; included here for manual installs.
+#
+# `servercase-probe install` generates the HTTP-ingest unit for you; this
+# WebSocket variant is included for manual installs that prefer a single
+# long-lived connection via websocat.
 #
 #   1. Put binaries at /opt/servercase-probe/{servercase-probe,websocat}
 #   2. Create /etc/servercase-probe/probe.env (chmod 600) with:
