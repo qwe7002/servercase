@@ -5,6 +5,8 @@ use std::time::Duration;
 
 use servercase_probe::{collect_snapshot, CollectOptions, CollectorState};
 
+mod install;
+
 struct Config {
     interval: Option<u64>,
     options: CollectOptions,
@@ -12,6 +14,13 @@ struct Config {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+
+    // `install` / `uninstall` set up (or tear down) the systemd service from
+    // the running binary, replacing the old deploy/install.sh script.
+    if let Some(code) = install::dispatch(&args) {
+        process::exit(code);
+    }
+
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         print_help();
         return;
@@ -84,6 +93,6 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
 
 fn print_help() {
     println!(
-        "servercase-probe\n\nUsage:\n  servercase-probe --once [--public-ip] [--security-updates]\n  servercase-probe --interval <seconds> [--public-ip] [--security-updates]\n\nFlags:\n  --once              emit a single snapshot\n  --interval <secs>   emit one snapshot per interval\n  --public-ip         also look up the host's public IPv4/IPv6 (needs outbound\n                      internet and curl/wget; cached for a few minutes)\n  --security-updates  best-effort check for pending security updates via apt,\n                      dnf or yum; cached for several hours\n\nThe probe prints ServerCase probe v1 JSON snapshots to stdout. A future\nCloudflare Worker can receive the same payload over HTTPS."
+        "servercase-probe\n\nUsage:\n  servercase-probe --once [--public-ip] [--security-updates]\n  servercase-probe --interval <seconds> [--public-ip] [--security-updates]\n  servercase-probe install [--api <url>] [--token <scp_…> | --session <jwt>] ...\n  servercase-probe uninstall [--system | --user-service]\n\nFlags:\n  --once              emit a single snapshot\n  --interval <secs>   emit one snapshot per interval\n  --public-ip         also look up the host's public IPv4/IPv6 (needs outbound\n                      internet and curl/wget; cached for a few minutes)\n  --security-updates  best-effort check for pending security updates via apt,\n                      dnf or yum; cached for several hours\n\nCommands:\n  install             install the probe as a hardened systemd service that\n                      posts snapshots to the worker (see `install --help`)\n  uninstall           stop and remove that service\n\nThe probe prints ServerCase probe v1 JSON snapshots to stdout, and the worker\nreceives the same payload over HTTPS (POST /v1/ingest)."
     );
 }

@@ -36,15 +36,32 @@ internet and `curl`/`wget`; cached for ~5 minutes, off by default).
 security updates (cached for ~6 hours, off by default). Unsupported distros or
 missing tools report an unknown state rather than failing the snapshot.
 
+## Install as a service
+
+The binary installs itself as a hardened `systemd` service — there is no
+separate install script. With a probe token in hand:
+
+```sh
+servercase-probe install --api https://worker.example.com --token scp_xxx
+```
+
+Or auto-register the host and mint a token in one step with
+`--session <login token>`. Re-running upgrades in place;
+`servercase-probe uninstall` removes the service. See [`deploy`](deploy) for the
+full flag list and what gets installed.
+
 ## Release binaries
 
 The repository includes a GitHub Actions workflow that publishes Linux binaries
 for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` on `v*` tags.
-The deployment script can download those assets automatically:
+Download the matching asset, mark it executable, then run its `install`
+subcommand:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/qwe7002/servercase/refs/heads/main/probe/deploy/install.sh \
-  | bash -s -- --api https://worker.example.com --token scp_xxx
+target=x86_64-unknown-linux-gnu   # or aarch64-unknown-linux-gnu
+curl -fsSL "https://github.com/qwe7002/servercase/releases/latest/download/servercase-probe-$target" -o servercase-probe
+chmod +x servercase-probe
+./servercase-probe install --api https://worker.example.com --token scp_xxx
 ```
 
 ## Cloudflare Worker
@@ -64,7 +81,7 @@ Instead its stdout JSON is posted line-by-line to the worker's HTTP ingest
 endpoint with `curl`:
 
 ```sh
-TOKEN=scp_...   # created automatically over SSH by the app / deploy script
+TOKEN=scp_...   # created automatically over SSH by the app, or by `install`
 servercase-probe --interval 10 \
   | while IFS= read -r line; do \
       printf %s "$line" | curl -fsS -X POST \
@@ -73,7 +90,7 @@ servercase-probe --interval 10 \
     done
 ```
 
-[`deploy`](deploy) automates all of this — fetching the binary, registering the
-host and installing a hardened `systemd` service. The worker also still accepts
+The `install` subcommand automates all of this — registering the host and
+installing a hardened `systemd` service (see [`deploy`](deploy)). The worker also still accepts
 a streaming WebSocket at `/v1/ingest/ws` (e.g. via `websocat`) for environments
 that prefer a single long-lived connection.
