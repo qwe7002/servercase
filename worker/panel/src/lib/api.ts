@@ -47,6 +47,12 @@ export interface ProbeSnapshot {
   uptime_sec: number;
   cpu_usage: number | null;
   memory: { mem_used_kb: number; mem_total_kb: number };
+  security_updates?: {
+    available: boolean | null;
+    count: number | null;
+    source: string;
+    checked_at_ms: number;
+  } | null;
 }
 
 export interface ProbeHost {

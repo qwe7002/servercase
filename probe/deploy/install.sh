@@ -30,6 +30,7 @@ SESSION=""          # user session token, for auto-registration
 NAME="$(hostname)"  # host name to register
 INTERVAL=10
 PUBLIC_IP=""        # set to "--public-ip" to enable public-IP lookup
+SECURITY_UPDATES="" # set to "--security-updates" to check package security updates
 PROBE_URL=""        # download URL for the servercase-probe binary
 PROBE_PATH=""       # path to a prebuilt servercase-probe binary
 BUILD_DIR=""        # cargo source dir to build from (defaults to repo probe/)
@@ -62,6 +63,7 @@ while [ $# -gt 0 ]; do
     --name)             NAME="$2"; shift 2;;
     --interval)         INTERVAL="$2"; shift 2;;
     --public-ip)        PUBLIC_IP="--public-ip"; shift;;
+    --security-updates) SECURITY_UPDATES="--security-updates"; shift;;
     --probe-url)        PROBE_URL="$2"; shift 2;;
     --probe-path)       PROBE_PATH="$2"; shift 2;;
     --build)            BUILD_DIR="$2"; shift 2;;
@@ -221,6 +223,7 @@ INGEST_URL=$INGEST_URL
 TOKEN=$TOKEN
 INTERVAL=$INTERVAL
 PUBLIC_IP=$PUBLIC_IP
+SECURITY_UPDATES=$SECURITY_UPDATES
 EOF
 if [ "$INSTALL_MODE" = "system" ]; then
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$CONF_DIR"
@@ -248,7 +251,7 @@ EOF
   fi
   cat <<EOF
 EnvironmentFile=$ENV_FILE
-ExecStart=/bin/sh -c '"\$\$PROBE_BIN" --interval "\$\$INTERVAL" \$\$PUBLIC_IP | while IFS= read -r line; do printf %s "\$\$line" | curl -fsS -m 20 -X POST -H "Authorization: Bearer \$\$TOKEN" -H "content-type: application/json" --data-binary @- "\$\$INGEST_URL" >/dev/null 2>&1 || true; done'
+ExecStart=/bin/sh -c '"\$\$PROBE_BIN" --interval "\$\$INTERVAL" \$\$PUBLIC_IP \$\$SECURITY_UPDATES | while IFS= read -r line; do printf %s "\$\$line" | curl -fsS -m 20 -X POST -H "Authorization: Bearer \$\$TOKEN" -H "content-type: application/json" --data-binary @- "\$\$INGEST_URL" >/dev/null 2>&1 || true; done'
 Restart=always
 RestartSec=5
 # Hardening — the probe only needs to read /proc and run df/ip/curl.

@@ -508,7 +508,7 @@ private func probeInstallCommand(apiURL: String, token: String, hostName: String
         "tmp=\"$(mktemp)\"",
         "if command -v curl >/dev/null 2>&1; then curl -fsSL \(shellQuote(probeInstallScriptURL)) -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \(shellQuote(probeInstallScriptURL)); else echo \"need curl or wget\"; exit 1; fi",
         "chmod 700 \"$tmp\"",
-        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip",
+        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip --security-updates",
         "rm -f \"$tmp\"",
     ].joined(separator: "; ")
 }

@@ -9,6 +9,7 @@
 #        TOKEN=scp_xxx
 #        INTERVAL=10
 #        PUBLIC_IP=          # or: --public-ip
+#        SECURITY_UPDATES=   # or: --security-updates
 #   3. systemctl enable --now servercase-probe
 #
 # The `$$VAR` form passes a literal `$VAR` through systemd to /bin/sh, which
@@ -24,7 +25,7 @@ Wants=network-online.target
 Type=simple
 User=servercase
 EnvironmentFile=/etc/servercase-probe/probe.env
-ExecStart=/bin/sh -c '"$$PROBE_BIN" --interval "$$INTERVAL" $$PUBLIC_IP | "$$WEBSOCAT_BIN" --ping-interval 25 --ping-timeout 60 -H "Authorization: Bearer $$TOKEN" "$$WS_URL"'
+ExecStart=/bin/sh -c '"$$PROBE_BIN" --interval "$$INTERVAL" $$PUBLIC_IP $$SECURITY_UPDATES | "$$WEBSOCAT_BIN" --ping-interval 25 --ping-timeout 60 -H "Authorization: Bearer $$TOKEN" "$$WS_URL"'
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

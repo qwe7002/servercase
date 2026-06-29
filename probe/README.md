@@ -10,6 +10,8 @@ It uses no external crates:
   memory, CPU usage and network totals/rates
 - reports **per-mount disk usage** (via `df`), **NIC IPv4/IPv6 addresses** (via
   `ip`), and optionally the host's **public IPv4/IPv6** (via `curl`/`wget`)
+- can optionally report whether cached package-manager metadata shows pending
+  **security updates** (via `apt`, `dnf` or `yum`, cached for ~6 hours)
 - prints `servercase.probe.v1` JSON to stdout
 - keeps CPU/network delta state in memory for interval mode
 
@@ -24,11 +26,15 @@ that section is simply empty.
 cargo run -- --once
 cargo run -- --interval 10
 cargo run -- --interval 10 --public-ip
+cargo run -- --interval 10 --security-updates
 ```
 
 `--once` emits a single snapshot; `--interval <seconds>` emits one per interval.
 `--public-ip` additionally looks up the host's public addresses (needs outbound
 internet and `curl`/`wget`; cached for ~5 minutes, off by default).
+`--security-updates` performs a best-effort package-manager check for pending
+security updates (cached for ~6 hours, off by default). Unsupported distros or
+missing tools report an unknown state rather than failing the snapshot.
 
 ## Release binaries
 

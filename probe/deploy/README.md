@@ -31,7 +31,7 @@ Or auto-register this host with your account (mints a token for you):
   --api https://worker.example.com \
   --session <your login token> \
   --name "$(hostname)" \
-  --interval 10 --public-ip
+  --interval 10 --public-ip --security-updates
 ```
 
 Run straight from a checkout (builds the probe with `cargo` when available), or
@@ -49,6 +49,7 @@ downloads the matching Linux binary from GitHub Releases.
 | `--name <name>` | Host name to register (default: `hostname`). |
 | `--interval <secs>` | Snapshot interval (default `10`). |
 | `--public-ip` | Also look up the host's public IP. |
+| `--security-updates` | Also check whether cached package-manager metadata reports pending security updates (apt/dnf/yum; cached by the probe). |
 | `--probe-path <file>` / `--probe-url <url>` | Use a prebuilt probe binary instead of building. |
 | `--build <dir>` | Cargo source dir to build from (default: repo `probe/`). |
 | `--github-repo <owner/repo>` | Release repo for automatic probe downloads (default `qwe7002/servercase`, or `$SERVERCASE_GITHUB_REPO`). |

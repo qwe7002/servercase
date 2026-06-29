@@ -17,7 +17,7 @@ export function buildProbeInstallCommand(apiUrl: string, token: string, hostName
     'chmod 700 "$tmp"',
     `bash "$tmp" --user-service --api ${shellQuote(apiUrl)} --token ${shellQuote(
       token,
-    )} --name ${shellQuote(hostName)} --interval 10 --public-ip`,
+    )} --name ${shellQuote(hostName)} --interval 10 --public-ip --security-updates`,
     'rm -f "$tmp"',
   ].join('; ');
 }

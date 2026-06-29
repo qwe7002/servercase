@@ -6,12 +6,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// How long a fetched public IP stays fresh before it is looked up again.
 const PUBLIC_IP_TTL_MS: u128 = 5 * 60 * 1000;
+/// Package-manager security checks are much heavier than /proc reads, so keep
+/// them out of the hot path after the first successful/known result.
+const SECURITY_UPDATES_TTL_MS: u128 = 6 * 60 * 60 * 1000;
 
 #[derive(Clone, Debug, Default)]
 pub struct CollectorState {
     cpu: Option<CpuSample>,
     net: Option<NetSample>,
     public_ip: Option<PublicIpCache>,
+    security_updates: Option<SecurityUpdatesCache>,
 }
 
 /// Options controlling what an individual snapshot collects.
@@ -20,6 +24,9 @@ pub struct CollectOptions {
     /// Look up the host's public IPv4/IPv6 via an external service (needs
     /// outbound internet and `curl`/`wget`). Cached for a few minutes.
     pub public_ip: bool,
+    /// Best-effort package-manager check for pending security updates. Cached
+    /// for several hours because distro package tools can be slow.
+    pub security_updates: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +40,7 @@ pub struct Snapshot {
     pub memory: Memory,
     pub disks: Vec<Disk>,
     pub network: Network,
+    pub security_updates: Option<SecurityUpdates>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -69,6 +77,14 @@ pub struct Network {
     pub public_ipv6: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct SecurityUpdates {
+    pub available: Option<bool>,
+    pub count: Option<u64>,
+    pub source: String,
+    pub checked_at_ms: u128,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct CpuSample {
     total: u64,
@@ -86,6 +102,12 @@ struct NetSample {
 struct PublicIpCache {
     ipv4: Option<String>,
     ipv6: Option<String>,
+    fetched_at_ms: u128,
+}
+
+#[derive(Clone, Debug)]
+struct SecurityUpdatesCache {
+    value: SecurityUpdates,
     fetched_at_ms: u128,
 }
 
@@ -129,6 +151,11 @@ pub fn collect_snapshot(
     } else {
         (None, None)
     };
+    let security_updates = if options.security_updates {
+        read_security_updates(state, now)
+    } else {
+        None
+    };
 
     Ok(Snapshot {
         collected_at_ms: now,
@@ -148,13 +175,14 @@ pub fn collect_snapshot(
             public_ipv4,
             public_ipv6,
         },
+        security_updates,
     })
 }
 
 impl Snapshot {
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"schema\":\"servercase.probe.v1\",\"collected_at_ms\":{},\"hostname\":\"{}\",\"kernel\":\"{}\",\"uptime_sec\":{},\"load_avg\":[{},{},{}],\"cpu_usage\":{},\"memory\":{{\"mem_total_kb\":{},\"mem_used_kb\":{},\"swap_total_kb\":{},\"swap_used_kb\":{}}},\"disks\":{},\"network\":{{\"rx_bytes_total\":{},\"tx_bytes_total\":{},\"rx_bytes_per_sec\":{},\"tx_bytes_per_sec\":{},\"interfaces\":{},\"public_ipv4\":{},\"public_ipv6\":{}}}}}",
+            "{{\"schema\":\"servercase.probe.v1\",\"collected_at_ms\":{},\"hostname\":\"{}\",\"kernel\":\"{}\",\"uptime_sec\":{},\"load_avg\":[{},{},{}],\"cpu_usage\":{},\"memory\":{{\"mem_total_kb\":{},\"mem_used_kb\":{},\"swap_total_kb\":{},\"swap_used_kb\":{}}},\"disks\":{},\"network\":{{\"rx_bytes_total\":{},\"tx_bytes_total\":{},\"rx_bytes_per_sec\":{},\"tx_bytes_per_sec\":{},\"interfaces\":{},\"public_ipv4\":{},\"public_ipv6\":{}}},\"security_updates\":{}}}",
             self.collected_at_ms,
             escape_json(&self.hostname),
             escape_json(&self.kernel),
@@ -175,6 +203,7 @@ impl Snapshot {
             interfaces_json(&self.network.interfaces),
             option_string(&self.network.public_ipv4),
             option_string(&self.network.public_ipv6),
+            security_updates_json(&self.security_updates),
         )
     }
 }
@@ -235,9 +264,7 @@ fn parse_memory(raw: &str) -> Memory {
 /// in /proc, so we use coreutils, like the SSH clients do).
 fn read_disks() -> Vec<Disk> {
     match Command::new("df").args(["-k", "-P"]).output() {
-        Ok(out) if out.status.success() => {
-            parse_disks(&String::from_utf8_lossy(&out.stdout))
-        }
+        Ok(out) if out.status.success() => parse_disks(&String::from_utf8_lossy(&out.stdout)),
         _ => Vec::new(),
     }
 }
@@ -277,9 +304,7 @@ fn read_interfaces() -> Vec<Nic> {
         .args(["-o", "addr", "show", "scope", "global"])
         .output()
     {
-        Ok(out) if out.status.success() => {
-            parse_interfaces(&String::from_utf8_lossy(&out.stdout))
-        }
+        Ok(out) if out.status.success() => parse_interfaces(&String::from_utf8_lossy(&out.stdout)),
         _ => Vec::new(),
     }
 }
@@ -320,10 +345,7 @@ fn parse_interfaces(raw: &str) -> Vec<Nic> {
         .collect()
 }
 
-fn refresh_public_ip(
-    state: &mut CollectorState,
-    now: u128,
-) -> (Option<String>, Option<String>) {
+fn refresh_public_ip(state: &mut CollectorState, now: u128) -> (Option<String>, Option<String>) {
     if let Some(cache) = &state.public_ip {
         if now.saturating_sub(cache.fetched_at_ms) < PUBLIC_IP_TTL_MS {
             return (cache.ipv4.clone(), cache.ipv6.clone());
@@ -355,6 +377,67 @@ fn fetch_public_ip(family: &str, url: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn read_security_updates(state: &mut CollectorState, now: u128) -> Option<SecurityUpdates> {
+    if let Some(cache) = &state.security_updates {
+        if now.saturating_sub(cache.fetched_at_ms) < SECURITY_UPDATES_TTL_MS {
+            return Some(cache.value.clone());
+        }
+    }
+
+    let value = detect_security_updates(now)?;
+    state.security_updates = Some(SecurityUpdatesCache {
+        value: value.clone(),
+        fetched_at_ms: now,
+    });
+    Some(value)
+}
+
+fn detect_security_updates(now: u128) -> Option<SecurityUpdates> {
+    let checks: [(&str, &str); 3] = [
+        (
+            "apt",
+            "command -v apt-get >/dev/null 2>&1 && apt-get -s upgrade 2>/dev/null | awk 'BEGIN{c=0} /^Inst / && tolower($0) ~ /security/ {c++} END{print c+0}'",
+        ),
+        (
+            "dnf",
+            "command -v dnf >/dev/null 2>&1 && dnf -q updateinfo list security updates 2>/dev/null | awk 'NF && $1 !~ /^(Last|Available|Updated)$/ {c++} END{print c+0}'",
+        ),
+        (
+            "yum",
+            "command -v yum >/dev/null 2>&1 && yum -q --security check-update 2>/dev/null | awk 'NF && $1 !~ /^(Loaded|Security:|Obsoleting|Update)$/ {c++} END{print c+0}'",
+        ),
+    ];
+
+    for (source, script) in checks {
+        if let Some(count) = run_security_count(script) {
+            return Some(SecurityUpdates {
+                available: Some(count > 0),
+                count: Some(count),
+                source: source.to_string(),
+                checked_at_ms: now,
+            });
+        }
+    }
+
+    Some(SecurityUpdates {
+        available: None,
+        count: None,
+        source: "unknown".to_string(),
+        checked_at_ms: now,
+    })
+}
+
+fn run_security_count(script: &str) -> Option<u64> {
+    let out = Command::new("timeout")
+        .args(["8s", "sh", "-c", script])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
 fn parse_network_totals(raw: &str) -> (u64, u64) {
@@ -476,6 +559,33 @@ fn option_string(value: &Option<String>) -> String {
     }
 }
 
+fn security_updates_json(value: &Option<SecurityUpdates>) -> String {
+    match value {
+        Some(v) => format!(
+            "{{\"available\":{},\"count\":{},\"source\":\"{}\",\"checked_at_ms\":{}}}",
+            option_bool(v.available),
+            option_u64(v.count),
+            escape_json(&v.source),
+            v.checked_at_ms,
+        ),
+        None => "null".to_string(),
+    }
+}
+
+fn option_bool(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "null",
+    }
+}
+
+fn option_u64(value: Option<u64>) -> String {
+    value
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "null".to_string())
+}
+
 fn escape_json(value: &str) -> String {
     let mut out = String::new();
     for ch in value.chars() {
@@ -554,8 +664,18 @@ tmpfs              1024000       0   1024000       0% /run
         assert_eq!(
             parse_disks(raw),
             vec![
-                Disk { fs: "/dev/sda1".into(), mount: "/".into(), used_kb: 4096000, total_kb: 10240000 },
-                Disk { fs: "/dev/sdb1".into(), mount: "/data".into(), used_kb: 1024000, total_kb: 20480000 },
+                Disk {
+                    fs: "/dev/sda1".into(),
+                    mount: "/".into(),
+                    used_kb: 4096000,
+                    total_kb: 10240000
+                },
+                Disk {
+                    fs: "/dev/sdb1".into(),
+                    mount: "/data".into(),
+                    used_kb: 1024000,
+                    total_kb: 20480000
+                },
             ]
         );
     }
