@@ -13,6 +13,7 @@ final class SSHTunnelInboundHandler: ChannelInboundHandler, @unchecked Sendable 
 
     let stream: AsyncStream<Data>
     private let continuation: AsyncStream<Data>.Continuation
+    var onClose: (@Sendable () -> Void)?
 
     init() {
         var continuation: AsyncStream<Data>.Continuation!
@@ -28,13 +29,18 @@ final class SSHTunnelInboundHandler: ChannelInboundHandler, @unchecked Sendable 
     }
 
     func channelInactive(context: ChannelHandlerContext) {
-        continuation.finish()
+        finish()
         context.fireChannelInactive()
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        continuation.finish()
+        finish()
         context.close(promise: nil)
+    }
+
+    private func finish() {
+        onClose?()
+        continuation.finish()
     }
 }
 
@@ -42,23 +48,50 @@ final class SSHTunnelInboundHandler: ChannelInboundHandler, @unchecked Sendable 
 /// the remote target; `incoming` yields bytes received back from it.
 final class SSHTunnel: @unchecked Sendable {
     private let channel: Channel
+    private let stateQueue = DispatchQueue(label: "com.servercase.ssh-tunnel.state")
+    private var closed = false
     let incoming: AsyncStream<Data>
 
     init(channel: Channel, inbound: SSHTunnelInboundHandler) {
         self.channel = channel
         self.incoming = inbound.stream
+        inbound.onClose = { [weak self] in
+            self?.markClosed()
+        }
     }
 
-    /// `writeAndFlush` hops to the channel's event loop, so this is safe to call
-    /// from the proxy's connection queue.
+    /// `writeAndFlush` is performed on the channel's event loop. That keeps the
+    /// active-state check ordered with close/inactive events and avoids writes
+    /// racing a closed SSH child channel.
     func write(_ data: Data) {
-        guard !data.isEmpty else { return }
-        var buffer = channel.allocator.buffer(capacity: data.count)
-        buffer.writeBytes(data)
-        channel.writeAndFlush(buffer, promise: nil)
+        guard !data.isEmpty, !isClosed else { return }
+        channel.eventLoop.execute { [weak self] in
+            guard let self, !self.isClosed, self.channel.isActive else { return }
+            var buffer = self.channel.allocator.buffer(capacity: data.count)
+            buffer.writeBytes(data)
+            self.channel.writeAndFlush(buffer, promise: nil)
+        }
     }
 
     func close() {
-        channel.close(promise: nil)
+        guard markClosed() else { return }
+        channel.eventLoop.execute { [channel] in
+            if channel.isActive {
+                channel.close(promise: nil)
+            }
+        }
+    }
+
+    @discardableResult
+    private func markClosed() -> Bool {
+        stateQueue.sync {
+            guard !closed else { return false }
+            closed = true
+            return true
+        }
+    }
+
+    private var isClosed: Bool {
+        stateQueue.sync { closed }
     }
 }

@@ -37,7 +37,7 @@ struct FilesView: View {
             header
             Divider()
             if horizontalSizeClass == .regular {
-                regularBrowser
+                adaptiveRegularBrowser
             } else {
                 compactBrowser
             }
@@ -72,6 +72,16 @@ struct FilesView: View {
             TextField("Name", text: $renameText)
             Button("Rename") { confirmRename() }
             Button("Cancel", role: .cancel) { renaming = nil }
+        }
+    }
+
+    private var adaptiveRegularBrowser: some View {
+        GeometryReader { proxy in
+            if proxy.size.width >= 820 {
+                regularBrowser
+            } else {
+                compactBrowser
+            }
         }
     }
 
@@ -133,33 +143,36 @@ struct FilesView: View {
 
                 Divider()
 
-                VStack(spacing: 0) {
-                    fileTableHeader
-                    Divider()
-                    ZStack(alignment: .top) {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                if loading && listing == nil {
-                                    ForEach(0..<12, id: \.self) { _ in
-                                        skeletonTableRow
-                                    }
-                                } else if (listing?.entries.isEmpty ?? false) {
-                                    Text("Empty directory.")
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 36)
-                                } else {
-                                    ForEach(listing?.entries ?? []) { entry in
-                                        tableRow(entry)
+                GeometryReader { tableProxy in
+                    let layout = FileTableLayout(width: tableProxy.size.width)
+                    VStack(spacing: 0) {
+                        fileTableHeader(layout)
+                        Divider()
+                        ZStack(alignment: .top) {
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    if loading && listing == nil {
+                                        ForEach(0..<12, id: \.self) { _ in
+                                            skeletonTableRow
+                                        }
+                                    } else if (listing?.entries.isEmpty ?? false) {
+                                        Text("Empty directory.")
+                                            .foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 36)
+                                    } else {
+                                        ForEach(listing?.entries ?? []) { entry in
+                                            tableRow(entry, layout: layout)
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if loading && listing != nil {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
+                            if loading && listing != nil {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                            }
                         }
                     }
                 }
@@ -208,17 +221,21 @@ struct FilesView: View {
         log.append(LogEntry(text: text, isError: isError))
     }
 
-    private var fileTableHeader: some View {
-        HStack(spacing: 12) {
+    private func fileTableHeader(_ layout: FileTableLayout) -> some View {
+        HStack(spacing: layout.spacing) {
             Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Size").frame(width: 88, alignment: .trailing)
-            Text("Type").frame(width: 110, alignment: .leading)
-            Text("Last modified").frame(width: 150, alignment: .leading)
-            Text("Permissions").frame(width: 86, alignment: .leading)
+            Text("Size").frame(width: layout.sizeWidth, alignment: .trailing)
+            Text("Type").frame(width: layout.typeWidth, alignment: .leading)
+            if layout.showsModified {
+                Text("Last modified").frame(width: layout.modifiedWidth, alignment: .leading)
+            }
+            if layout.showsPermissions {
+                Text("Permissions").frame(width: layout.permissionsWidth, alignment: .leading)
+            }
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, layout.horizontalPadding)
         .padding(.vertical, 8)
     }
 
@@ -233,39 +250,48 @@ struct FilesView: View {
         .redacted(reason: .placeholder)
     }
 
-    private func tableRow(_ entry: RemoteFile) -> some View {
+    private func tableRow(_ entry: RemoteFile, layout: FileTableLayout) -> some View {
         Button {
             selectedPath = entry.path
             open(entry)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: layout.spacing) {
                 HStack(spacing: 8) {
                     Image(systemName: icon(entry))
                         .foregroundStyle(entry.isDirectory ? Palette.warn : .secondary)
+                        .frame(width: 18)
                     Text(entry.name)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
 
                 Text(entry.isDirectory ? "" : Format.bytes(Double(entry.sizeBytes)))
-                    .frame(width: 88, alignment: .trailing)
+                    .frame(width: layout.sizeWidth, alignment: .trailing)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Text(typeLabel(entry))
-                    .frame(width: 110, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(width: layout.typeWidth, alignment: .leading)
                     .foregroundStyle(.secondary)
-                Text(entry.modifiedAt.formatted(date: .numeric, time: .shortened))
-                    .frame(width: 150, alignment: .leading)
-                    .foregroundStyle(.secondary)
-                Text(entry.mode)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 86, alignment: .leading)
-                    .foregroundStyle(.secondary)
+                if layout.showsModified {
+                    Text(entry.modifiedAt.formatted(date: .numeric, time: .shortened))
+                        .lineLimit(1)
+                        .frame(width: layout.modifiedWidth, alignment: .leading)
+                        .foregroundStyle(.secondary)
+                }
+                if layout.showsPermissions {
+                    Text(entry.mode)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(1)
+                        .frame(width: layout.permissionsWidth, alignment: .leading)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, layout.horizontalPadding)
         .padding(.vertical, 7)
         .background(selectedPath == entry.path ? Palette.accent.opacity(0.18) : Color.clear)
         .contextMenu {
@@ -595,6 +621,19 @@ private func ancestorPaths(_ path: String) -> [String] {
         out.append(current)
     }
     return out
+}
+
+private struct FileTableLayout {
+    let width: CGFloat
+
+    var showsModified: Bool { width >= 560 }
+    var showsPermissions: Bool { width >= 720 }
+    var spacing: CGFloat { width >= 640 ? 12 : 8 }
+    var horizontalPadding: CGFloat { width >= 640 ? 12 : 10 }
+    var sizeWidth: CGFloat { width >= 560 ? 88 : 72 }
+    var typeWidth: CGFloat { width >= 560 ? 110 : 92 }
+    var modifiedWidth: CGFloat { width >= 720 ? 150 : 132 }
+    var permissionsWidth: CGFloat { 86 }
 }
 
 private struct FileTreeNode: View {

@@ -183,7 +183,12 @@ final class ProxyBrowserModel: NSObject, ObservableObject {
         observations.forEach { $0.invalidate() }
         observations = []
         webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView = nil
         let proxy = self.proxy
+        self.proxy = nil
+        started = false
+        phase = .idle
         Task { await proxy?.stop() }
     }
 
