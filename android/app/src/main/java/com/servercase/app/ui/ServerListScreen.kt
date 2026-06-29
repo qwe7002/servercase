@@ -1,7 +1,8 @@
 package com.servercase.app.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,6 +51,7 @@ fun ServerListScreen(
     state: UiState,
     onAdd: () -> Unit,
     onOpen: (ServerConfig) -> Unit,
+    onReconnect: (ServerConfig) -> Unit,
     onEdit: (ServerConfig) -> Unit,
     onDelete: (ServerConfig) -> Unit,
     onOpenSettings: () -> Unit,
@@ -105,6 +107,7 @@ fun ServerListScreen(
                 server = server,
                 state = state.connState[server.id] ?: ConnectionState.DISCONNECTED,
                 onClick = { onOpen(server) },
+                onDoubleClick = { onReconnect(server) },
                 onEdit = { onEdit(server) },
                 onDelete = { onDelete(server) },
             )
@@ -144,15 +147,27 @@ fun ServerListScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ServerRow(
     server: ServerConfig,
     state: ConnectionState,
     onClick: () -> Unit,
+    onDoubleClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp).clickable(onClick = onClick)) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onDoubleClick = {
+                    if (state != ConnectionState.CONNECTING) onDoubleClick()
+                },
+            ),
+    ) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             StatusDot(state)
             Column(Modifier.weight(1f).padding(start = 12.dp)) {

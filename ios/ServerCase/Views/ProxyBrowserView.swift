@@ -97,8 +97,6 @@ struct ProxyBrowserView: View {
                 .onSubmit { browser.go() }
             if browser.isLoading {
                 Button { browser.stopLoading() } label: { Image(systemName: "xmark") }
-            } else {
-                Button { browser.reload() } label: { Image(systemName: "arrow.clockwise") }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -136,7 +134,7 @@ private struct WebViewContainer: UIViewRepresentable {
 
 @MainActor
 final class ProxyBrowserModel: NSObject, ObservableObject {
-    static let homePage = "https://duckduckgo.com"
+    static let homePage = "https://www.bing.com"
 
     enum Phase: Equatable {
         case idle
@@ -254,7 +252,7 @@ final class ProxyBrowserModel: NSObject, ObservableObject {
     func goForward() { webView?.goForward() }
 
     /// Turns address-bar text into a URL: a full URL as-is, a bare domain into
-    /// https, otherwise a DuckDuckGo search.
+    /// https, otherwise a Bing search.
     static func normalizeURL(_ text: String) -> URL {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: trimmed), let scheme = url.scheme,
@@ -266,7 +264,7 @@ final class ProxyBrowserModel: NSObject, ObservableObject {
             return url
         }
         let query = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-        return URL(string: "https://duckduckgo.com/?q=\(query)")
+        return URL(string: "https://www.bing.com/search?q=\(query)")
             ?? URL(string: homePage)!
     }
 }

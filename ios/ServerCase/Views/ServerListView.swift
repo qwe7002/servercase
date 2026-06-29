@@ -92,6 +92,11 @@ struct ServerListView: View {
             ServerRow(server: server)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                model.reconnect(server)
+            }
+        )
         .serverRowActions(server, model: model, editing: $editing)
     }
 
@@ -205,6 +210,11 @@ struct ServerSplitView: View {
     private func row(_ server: ServerConfig) -> some View {
         ServerRow(server: server)
             .tag(server.id)
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    model.reconnect(server)
+                }
+            )
             .serverRowActions(server, model: model, editing: $editing)
     }
 

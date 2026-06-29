@@ -153,6 +153,11 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         setState(id, ConnectionState.DISCONNECTED)
     }
 
+    fun reconnect(server: ServerConfig) = viewModelScope.launch {
+        disconnect(server.id)
+        connect(server)
+    }
+
     fun client(id: String): SshClient? = clients[id]
 
     /** Poll status for [id] every 3s while it stays connected and selected. */
