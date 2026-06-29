@@ -328,12 +328,10 @@ private struct CloudSettingsPage: View {
                         SecureField("Password", text: $password)
                         Button("Sign in") { authenticate(register: false) }
                             .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.isEmpty)
-                        Button("Create account") { authenticate(register: true) }
-                            .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.count < 8)
                     } header: {
                         Text("Sign in")
                     } footer: {
-                        Text("New accounts need a password of at least 8 characters.")
+                        Text("Use an existing ServerCase Cloud account.")
                     }
                 }
             }
@@ -355,7 +353,7 @@ private struct CloudSettingsPage: View {
                     email: email.trimmingCharacters(in: .whitespaces),
                     password: password)
                 password = ""
-                message = register ? "Account created." : "Signed in."
+                message = "Signed in."
             } catch {
                 message = errorText(error)
             }
@@ -403,14 +401,14 @@ private struct ProbeHostsPage: View {
     @Binding var message: String?
 
     @State private var busy = false
-    @State private var selectedServerId: UUID?
+    @State private var selectedServerId: String?
     @State private var installLog = ""
 
     var body: some View {
         Form {
             Section {
                 Picker("Install on", selection: $selectedServerId) {
-                    Text("Choose server").tag(Optional<UUID>.none)
+                    Text("Choose server").tag(Optional<String>.none)
                     ForEach(model.servers) { server in
                         Text(server.name).tag(Optional(server.id))
                     }
@@ -552,7 +550,7 @@ struct SnippetEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(Snippet(id: snippet?.id ?? UUID(),
+                        onSave(Snippet(id: snippet?.id ?? UUID().uuidString,
                                        name: name.trimmingCharacters(in: .whitespaces),
                                        command: command.trimmingCharacters(in: .whitespaces)))
                         dismiss()

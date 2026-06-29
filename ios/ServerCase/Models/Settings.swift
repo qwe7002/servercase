@@ -2,7 +2,7 @@ import Foundation
 
 /// A reusable shell command, runnable in any server's terminal.
 struct Snippet: Identifiable, Codable, Equatable, Hashable {
-    var id: UUID = UUID()
+    var id: String = UUID().uuidString
     var name: String
     var command: String
 }

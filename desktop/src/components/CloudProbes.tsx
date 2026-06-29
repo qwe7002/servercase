@@ -26,7 +26,6 @@ export function CloudProbes() {
   const token = useCloud((s) => s.token);
   const hosts = useProbes((s) => s.hosts);
   const status = useProbes((s) => s.streamStatus);
-  const setHosts = useProbes((s) => s.setHosts);
   const removeProbeHost = useProbes((s) => s.removeHost);
 
   const [busy, setBusy] = useState(false);

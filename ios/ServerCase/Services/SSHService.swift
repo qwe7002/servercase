@@ -81,7 +81,7 @@ actor SSHService {
                 originatorAddress: originator
             )
         ) { channel in
-            channel.pipeline.addHandlers([SSHChannelDataWrapper(), inbound])
+            channel.pipeline.addHandler(inbound)
         }
         return SSHTunnel(channel: channel, inbound: inbound)
     }

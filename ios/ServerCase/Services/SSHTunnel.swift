@@ -6,31 +6,6 @@ enum SSHTunnelError: Error {
     case invalidChannelData
 }
 
-/// Wraps/unwraps between raw `ByteBuffer` and NIOSSH's `SSHChannelData`, so the
-/// rest of a direct-tcpip channel's pipeline can speak plain bytes. Mirrors the
-/// handler used in apple/swift-nio-ssh's port-forwarding example.
-final class SSHChannelDataWrapper: ChannelDuplexHandler, @unchecked Sendable {
-    typealias InboundIn = SSHChannelData
-    typealias InboundOut = ByteBuffer
-    typealias OutboundIn = ByteBuffer
-    typealias OutboundOut = SSHChannelData
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let data = self.unwrapInboundIn(data)
-        guard case .channel = data.type, case .byteBuffer(let buffer) = data.data else {
-            context.fireErrorCaught(SSHTunnelError.invalidChannelData)
-            return
-        }
-        context.fireChannelRead(self.wrapInboundOut(buffer))
-    }
-
-    func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
-        let buffer = self.unwrapOutboundIn(data)
-        let wrapped = SSHChannelData(type: .channel, data: .byteBuffer(buffer))
-        context.write(self.wrapOutboundOut(wrapped), promise: promise)
-    }
-}
-
 /// Bridges inbound bytes from a direct-tcpip channel to an `AsyncStream` the
 /// proxy can consume, and finishes the stream when the channel closes.
 final class SSHTunnelInboundHandler: ChannelInboundHandler, @unchecked Sendable {
