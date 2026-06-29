@@ -27,6 +27,12 @@ export interface ProbeSnapshotV1 {
     public_ipv4: string | null;
     public_ipv6?: string | null;
   };
+  security_updates?: {
+    available: boolean | null;
+    count: number | null;
+    source: string;
+    checked_at_ms: number;
+  } | null;
 }
 
 type StreamEvent =

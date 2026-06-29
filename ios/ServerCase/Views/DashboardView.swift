@@ -6,13 +6,19 @@ struct DashboardView: View {
     let server: ServerConfig
 
     @State private var selectedTab: ServerDetailTab = .overview
+    @State private var installingProbe = false
+    @State private var probeInstallError: String?
+    @State private var probeInstallLog: String?
 
+    /// The latest copy from the model, so a freshly linked probe is reflected
+    /// without waiting for the parent to pass a new value.
+    private var liveServer: ServerConfig { model.servers.first { $0.id == server.id } ?? server }
     private var state: ConnectionState { model.state(server.id) }
-    private var probeHost: ProbeHost? { model.probeHost(for: server) }
-    private var probeStatus: ServerStatus? { model.probeStatus(for: server) }
+    private var probeHost: ProbeHost? { model.probeHost(for: liveServer) }
+    private var probeStatus: ServerStatus? { model.probeStatus(for: liveServer) }
     private var status: ServerStatus? { probeStatus ?? model.status[server.id] }
     private var connected: Bool { state == .connected }
-    private var usesProbe: Bool { server.probeHostId != nil }
+    private var usesProbe: Bool { liveServer.probeHostId != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,6 +57,7 @@ struct DashboardView: View {
         case .overview: return server.name
         case .terminal: return "Terminal"
         case .files: return "Files"
+        case .browser: return "Browser"
         }
     }
 
@@ -63,6 +70,8 @@ struct DashboardView: View {
             TerminalTabsView(server: server)
         case .files:
             FilesView(server: server)
+        case .browser:
+            ProxyBrowserView(server: server)
         }
     }
 
@@ -81,6 +90,10 @@ struct DashboardView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10).background(Palette.danger.opacity(0.12))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+
+                if !usesProbe {
+                    probeInstallBanner
                 }
 
                 if usesProbe, probeStatus == nil {
@@ -104,6 +117,68 @@ struct DashboardView: View {
             .padding(10)
             .frame(maxWidth: overviewMaxWidth, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .top)
+        }
+    }
+
+    /// One-tap probe install, matching the desktop dashboard. Creates a cloud
+    /// probe named after the host, installs it over SSH, and links it.
+    private var probeInstallBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Probe not installed", systemImage: "dot.radiowaves.left.and.right")
+                .font(.subheadline.weight(.semibold))
+            Text("Install a lightweight probe on this server to keep Overview updated without SSH polling and to receive cloud alerts.")
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let probeInstallError {
+                Text(probeInstallError)
+                    .font(.caption).foregroundStyle(Palette.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let probeInstallLog, !probeInstallLog.isEmpty {
+                Text(probeInstallLog)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    installProbe()
+                } label: {
+                    if installingProbe {
+                        ProgressView()
+                    } else {
+                        Label("Install probe", systemImage: "arrow.down.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(installingProbe || !model.cloudSignedIn)
+
+                if !model.cloudSignedIn {
+                    Text("Sign in to ServerCase Cloud first")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func installProbe() {
+        installingProbe = true
+        probeInstallError = nil
+        probeInstallLog = nil
+        Task {
+            do {
+                probeInstallLog = try await model.installProbeAuto(on: liveServer)
+            } catch {
+                probeInstallError = error.localizedDescription
+            }
+            installingProbe = false
         }
     }
 
@@ -239,6 +314,7 @@ private enum ServerDetailTab: CaseIterable, Identifiable {
     case overview
     case terminal
     case files
+    case browser
 
     var id: Self { self }
 
@@ -247,6 +323,7 @@ private enum ServerDetailTab: CaseIterable, Identifiable {
         case .overview: return "Overview"
         case .terminal: return "Terminal"
         case .files: return "Files"
+        case .browser: return "Browser"
         }
     }
 
@@ -255,6 +332,7 @@ private enum ServerDetailTab: CaseIterable, Identifiable {
         case .overview: return "gauge.with.dots.needle.33percent"
         case .terminal: return "terminal"
         case .files: return "folder"
+        case .browser: return "globe"
         }
     }
 }

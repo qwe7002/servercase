@@ -67,6 +67,25 @@ actor SSHService {
         return buffer.readString(length: buffer.readableBytes) ?? ""
     }
 
+    /// Opens a direct-tcpip tunnel from the server to `host:port`. The in-app
+    /// SOCKS proxy that backs the proxy browser opens one of these per request,
+    /// multiplexed over this single SSH connection.
+    func openTunnel(host: String, port: Int) async throws -> SSHTunnel {
+        guard let client else { throw SSHServiceError.notConnected }
+        let inbound = SSHTunnelInboundHandler()
+        let originator = try SocketAddress(ipAddress: "127.0.0.1", port: 0)
+        let channel = try await client.createDirectTCPIPChannel(
+            using: SSHChannelType.DirectTCPIP(
+                targetHost: host,
+                targetPort: port,
+                originatorAddress: originator
+            )
+        ) { channel in
+            channel.pipeline.addHandler(inbound)
+        }
+        return SSHTunnel(channel: channel, inbound: inbound)
+    }
+
     func openTerminal(cols: Int = 120, rows: Int = 32) throws -> TerminalSession {
         guard let client else { throw SSHServiceError.notConnected }
 

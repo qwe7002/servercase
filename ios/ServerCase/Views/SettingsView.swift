@@ -328,12 +328,10 @@ private struct CloudSettingsPage: View {
                         SecureField("Password", text: $password)
                         Button("Sign in") { authenticate(register: false) }
                             .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.isEmpty)
-                        Button("Create account") { authenticate(register: true) }
-                            .disabled(busy || draft.cloud.url.isEmpty || email.isEmpty || password.count < 8)
                     } header: {
                         Text("Sign in")
                     } footer: {
-                        Text("New accounts need a password of at least 8 characters.")
+                        Text("Use an existing ServerCase Cloud account.")
                     }
                 }
             }
@@ -355,7 +353,7 @@ private struct CloudSettingsPage: View {
                     email: email.trimmingCharacters(in: .whitespaces),
                     password: password)
                 password = ""
-                message = register ? "Account created." : "Signed in."
+                message = "Signed in."
             } catch {
                 message = errorText(error)
             }
@@ -402,57 +400,27 @@ private struct ProbeHostsPage: View {
     @EnvironmentObject private var model: AppModel
     @Binding var message: String?
 
-    @State private var name = ""
     @State private var busy = false
-    @State private var selectedServerId: UUID?
-    @State private var newToken: NewProbeToken?
+    @State private var selectedServerId: String?
     @State private var installLog = ""
 
     var body: some View {
         Form {
-            Section("Add host") {
-                TextField("Host name", text: $name)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                Button("Create probe") { create() }
-                    .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
-
+            Section {
                 Picker("Install on", selection: $selectedServerId) {
-                    Text("Choose server").tag(Optional<UUID>.none)
+                    Text("Choose server").tag(Optional<String>.none)
                     ForEach(model.servers) { server in
                         Text(server.name).tag(Optional(server.id))
                     }
                 }
-                Button("Create and install") {
-                    createAndInstall()
+                Button("Install probe over SSH") {
+                    installSelected()
                 }
                 .disabled(busy || selectedServerId == nil)
-            }
-
-            if let newToken {
-                Section {
-                    Text(newToken.token)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                    Button("Copy token") {
-                        UIPasteboard.general.string = newToken.token
-                    }
-
-                    Picker("Install on", selection: $selectedServerId) {
-                        Text("Choose server").tag(Optional<UUID>.none)
-                        ForEach(model.servers) { server in
-                            Text(server.name).tag(Optional(server.id))
-                        }
-                    }
-                    Button("Install on selected server") {
-                        install(newToken)
-                    }
-                    .disabled(busy || selectedServerId == nil)
-                } header: {
-                    Text("Probe token for \(newToken.name)")
-                } footer: {
-                    Text("The token is shown only once. Installation uses the selected server's SSH connection and installs a user-level probe service.")
-                }
+            } header: {
+                Text("Add host")
+            } footer: {
+                Text("Creates a probe for the selected server and installs a user-level service over that server's SSH connection. The probe then posts status to ServerCase Cloud over HTTPS. Every probe is configured automatically over SSH — there is no manual token registration.")
             }
 
             Section("Hosts") {
@@ -499,23 +467,7 @@ private struct ProbeHostsPage: View {
         .task { await model.refreshProbes() }
     }
 
-    private func create() {
-        busy = true
-        message = nil
-        Task {
-            do {
-                let trimmed = name.trimmingCharacters(in: .whitespaces)
-                let result = try await model.createProbe(name: trimmed)
-                newToken = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
-                name = ""
-            } catch {
-                message = error.localizedDescription
-            }
-            busy = false
-        }
-    }
-
-    private func createAndInstall() {
+    private func installSelected() {
         guard let id = selectedServerId,
               let server = model.servers.first(where: { $0.id == id }) else { return }
         busy = true
@@ -523,29 +475,7 @@ private struct ProbeHostsPage: View {
         installLog = ""
         Task {
             do {
-                let result = try await model.createProbe(name: server.host.trimmingCharacters(in: .whitespaces))
-                let token = NewProbeToken(id: result.host.id, name: result.host.name, token: result.token)
-                newToken = token
-                installLog = try await model.installProbe(hostId: token.id, token: token.token, on: server)
-                newToken = nil
-                message = "Probe installed on \(server.name)."
-            } catch {
-                message = error.localizedDescription
-            }
-            busy = false
-        }
-    }
-
-    private func install(_ token: NewProbeToken) {
-        guard let id = selectedServerId,
-              let server = model.servers.first(where: { $0.id == id }) else { return }
-        busy = true
-        message = nil
-        installLog = ""
-        Task {
-            do {
-                installLog = try await model.installProbe(hostId: token.id, token: token.token, on: server)
-                newToken = nil
+                installLog = try await model.installProbeAuto(on: server)
                 message = "Probe installed on \(server.name)."
             } catch {
                 message = error.localizedDescription
@@ -571,12 +501,6 @@ private struct ProbeHostsPage: View {
         guard let lastSeenAt = host.lastSeenAt else { return false }
         return Date().timeIntervalSince(lastSeenAt) < 30
     }
-}
-
-private struct NewProbeToken: Identifiable {
-    var id: String
-    var name: String
-    var token: String
 }
 
 private struct TerminalSettingsPage: View {
@@ -626,7 +550,7 @@ struct SnippetEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(Snippet(id: snippet?.id ?? UUID(),
+                        onSave(Snippet(id: snippet?.id ?? UUID().uuidString,
                                        name: name.trimmingCharacters(in: .whitespaces),
                                        command: command.trimmingCharacters(in: .whitespaces)))
                         dismiss()

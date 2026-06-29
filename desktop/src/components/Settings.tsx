@@ -474,13 +474,11 @@ function CloudSection() {
     }
   };
 
-  const authenticate = (mode: 'login' | 'register') =>
+  const authenticate = () =>
     run(async () => {
-      const user = await cloudAuth(mode, email.trim(), password);
+      const user = await cloudAuth(email.trim(), password);
       setPassword('');
-      return mode === 'register'
-        ? `Account created — signed in as ${user.email}.`
-        : `Signed in as ${user.email}.`;
+      return `Signed in as ${user.email}.`;
     });
 
   const push = () =>
@@ -553,28 +551,18 @@ function CloudSection() {
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && void authenticate('login')}
+                    onKeyDown={(e) => e.key === 'Enter' && void authenticate()}
                   />
                 </div>
               </div>
               <div className="flex gap-2">
                 <Button
-                  onClick={() => void authenticate('login')}
+                  onClick={() => void authenticate()}
                   disabled={busy || !cloud.url || !email.trim() || !password}
                 >
                   Sign in
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => void authenticate('register')}
-                  disabled={busy || !cloud.url || !email.trim() || password.length < 8}
-                >
-                  Create account
-                </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                New accounts need a password of at least 8 characters.
-              </p>
             </div>
           ) : (
             <div className="grid gap-4">

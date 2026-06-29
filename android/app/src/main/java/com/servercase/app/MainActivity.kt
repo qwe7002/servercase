@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
                             state = state,
                             onAdd = { nav.navigate("form") },
                             onOpen = { nav.navigate("dashboard/${it.id}") },
+                            onReconnect = { vm.reconnect(it) },
                             onEdit = { nav.navigate("form?id=${it.id}") },
                             onDelete = { vm.delete(it.id) },
                             onOpenSettings = { nav.navigate("settings") },

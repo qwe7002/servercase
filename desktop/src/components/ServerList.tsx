@@ -192,6 +192,9 @@ function ServerRow({
             selectedId === srv.id && 'border-border bg-accent',
           )}
           onClick={() => select(srv.id)}
+          onDoubleClick={() => {
+            if (state !== 'connecting') void reconnect();
+          }}
         >
           <span
             className={cn(

@@ -72,11 +72,6 @@ async function call<T>(baseUrl: string, path: string, opts: CallOptions = {}): P
 
 /** Thin wrappers over the worker REST API. */
 export const cloudApi = {
-  register: (url: string, email: string, password: string) =>
-    call<AuthResponse>(url, '/v1/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    }),
   login: (url: string, email: string, password: string) =>
     call<AuthResponse>(url, '/v1/auth/login', {
       method: 'POST',
@@ -124,17 +119,16 @@ function session(): { url: string; token: string } {
   return { url, token: state.token };
 }
 
-/** Logs in (or registers) and stores the session locally. */
-export async function cloudAuth(
-  mode: 'login' | 'register',
-  email: string,
-  password: string,
-): Promise<CloudUser> {
+/** Logs in and stores the session locally. */
+export async function cloudAuth(email: string, password: string): Promise<CloudUser> {
   const url = useSettings.getState().settings.cloud.url;
-  const res = await (mode === 'register'
-    ? cloudApi.register(url, email, password)
-    : cloudApi.login(url, email, password));
+  const res = await cloudApi.login(url, email, password);
   useCloud.getState().setSession(res);
+  try {
+    await cloudPull();
+  } catch (e) {
+    if (!(e instanceof CloudError && e.status === 404)) throw e;
+  }
   useSettings.getState().setCloud({ email: res.user.email });
   return res.user;
 }

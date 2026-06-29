@@ -141,6 +141,7 @@ struct ProbeSnapshot: Codable, Equatable {
     var memory: ProbeMemory
     var disks: [ProbeDisk]
     var network: ProbeNetwork
+    var securityUpdates: ProbeSecurityUpdates?
 
     enum CodingKeys: String, CodingKey {
         case schema
@@ -153,6 +154,21 @@ struct ProbeSnapshot: Codable, Equatable {
         case memory
         case disks
         case network
+        case securityUpdates = "security_updates"
+    }
+}
+
+struct ProbeSecurityUpdates: Codable, Equatable {
+    var available: Bool?
+    var count: Int?
+    var source: String
+    var checkedAtMs: Double
+
+    enum CodingKeys: String, CodingKey {
+        case available
+        case count
+        case source
+        case checkedAtMs = "checked_at_ms"
     }
 }
 

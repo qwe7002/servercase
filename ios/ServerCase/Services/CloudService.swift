@@ -1,28 +1,105 @@
 import Foundation
-import UIKit
-import UserNotifications
-
-struct CloudUser: Codable, Equatable {
-    var id: String?
-    var email: String
-}
-
-struct CloudSession: Codable, Equatable {
-    var token: String
-    var expiresAt: Date
-    var user: CloudUser
-    var syncVersion: Int?
-    var syncedAt: Date?
-
-    var isValid: Bool {
-        expiresAt > Date()
-    }
-}
 
 struct CloudAuthResult: Codable {
     var token: String
     var expiresAt: Date
     var user: CloudUser
+
+    private enum CodingKeys: String, CodingKey {
+        case token
+        case accessToken
+        case access_token
+        case sessionToken
+        case session_token
+        case jwt
+        case expiresAt
+        case expires_at
+        case expiresIn
+        case expires_in
+        case user
+        case email
+        case data
+        case result
+        case session
+        case auth
+    }
+
+    init(token: String, expiresAt: Date, user: CloudUser) {
+        self.token = token
+        self.expiresAt = expiresAt
+        self.user = user
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let auth = try Self.authContainer(from: container)
+        token = try Self.decodeToken(from: auth)
+
+        if let explicitExpiry = try auth.decodeIfPresent(Date.self, forKey: .expiresAt)
+            ?? auth.decodeIfPresent(Date.self, forKey: .expires_at) {
+            expiresAt = explicitExpiry
+        } else if let expiresIn = try auth.decodeIfPresent(Double.self, forKey: .expiresIn)
+            ?? auth.decodeIfPresent(Double.self, forKey: .expires_in) {
+            expiresAt = Date().addingTimeInterval(expiresIn)
+        } else if let expiresIn = try auth.decodeIfPresent(Int.self, forKey: .expiresIn)
+            ?? auth.decodeIfPresent(Int.self, forKey: .expires_in) {
+            expiresAt = Date().addingTimeInterval(Double(expiresIn))
+        } else {
+            expiresAt = Date().addingTimeInterval(30 * 24 * 60 * 60)
+        }
+
+        if let user = try auth.decodeIfPresent(CloudUser.self, forKey: .user) {
+            self.user = user
+        } else {
+            self.user = CloudUser(id: nil, email: try auth.decodeIfPresent(String.self, forKey: .email) ?? "")
+        }
+    }
+
+    private static func authContainer(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> KeyedDecodingContainer<CodingKeys> {
+        if let nested = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .data) {
+            return nested
+        }
+        if let nested = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .result) {
+            return nested
+        }
+        if let nested = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .auth) {
+            return nested
+        }
+        return container
+    }
+
+    private static func decodeToken(from container: KeyedDecodingContainer<CodingKeys>) throws -> String {
+        if let token = try firstToken(in: container) {
+            return token
+        }
+        if let session = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .session),
+           let token = try firstToken(in: session) {
+            return token
+        }
+        throw DecodingError.keyNotFound(
+            CodingKeys.token,
+            DecodingError.Context(codingPath: container.codingPath, debugDescription: "Missing cloud auth token")
+        )
+    }
+
+    private static func firstToken(in container: KeyedDecodingContainer<CodingKeys>) throws -> String? {
+        let keys: [CodingKeys] = [.token, .accessToken, .access_token, .sessionToken, .session_token, .jwt]
+        for key in keys {
+            if let token = try container.decodeIfPresent(String.self, forKey: key) {
+                return token
+            }
+        }
+        return nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(token, forKey: .token)
+        try container.encode(expiresAt, forKey: .expiresAt)
+        try container.encode(user, forKey: .user)
+    }
 }
 
 struct CloudSyncResult: Codable {
@@ -36,74 +113,43 @@ struct CloudError: LocalizedError, Codable {
     var message: String
 
     var errorDescription: String? { message }
-}
 
-enum CloudSessionStore {
-    private static let key = "servercase.cloud.session"
-
-    static func load() -> CloudSession? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? CloudService.decoder.decode(CloudSession.self, from: data)
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case message
+        case error
     }
 
-    static func save(_ session: CloudSession?) {
-        guard let session else {
-            UserDefaults.standard.removeObject(forKey: key)
-            return
-        }
-        if let data = try? CloudService.encoder.encode(session) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
-}
-
-enum PushToken {
-    private static let key = "servercase.push.fcmToken"
-
-    static var current: String? {
-        get { UserDefaults.standard.string(forKey: key) }
-        set {
-            UserDefaults.standard.set(newValue, forKey: key)
-            NotificationCenter.default.post(name: .fcmTokenReceived, object: nil)
-        }
-    }
-}
-
-extension Notification.Name {
-    static let fcmTokenReceived = Notification.Name("servercase.fcmTokenReceived")
-}
-
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    func application(
-        _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
-    ) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
-        Task { @MainActor in
-            let center = UNUserNotificationCenter.current()
-            let granted = try? await center.requestAuthorization(options: [.alert, .badge, .sound])
-            if granted == true {
-                application.registerForRemoteNotifications()
-            }
-        }
-        return true
+    init(status: Int, message: String) {
+        self.status = status
+        self.message = message
     }
 
-    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        PushToken.current = deviceToken.map { String(format: "%02x", $0) }.joined()
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        status = try container.decodeIfPresent(Int.self, forKey: .status) ?? 0
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+            ?? container.decodeIfPresent(String.self, forKey: .error)
+            ?? "Cloud request failed"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(status, forKey: .status)
+        try container.encode(message, forKey: .message)
     }
 }
 
 struct CloudService {
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .millisecondsSince1970
         return encoder
     }()
 
     static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         return decoder
     }()
 
@@ -173,7 +219,8 @@ struct CloudService {
         default: throw CloudError(status: 0, message: "Invalid cloud URL")
         }
         let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = "/" + [basePath, "stream"].filter { !$0.isEmpty }.joined(separator: "/")
+        let pathParts = basePath.isEmpty ? ["v1", "stream"] : [basePath, "stream"]
+        components.path = "/" + pathParts.filter { !$0.isEmpty }.joined(separator: "/")
         components.queryItems = [URLQueryItem(name: "token", value: token)]
         guard let url = components.url else {
             throw CloudError(status: 0, message: "Invalid cloud URL")
@@ -191,13 +238,61 @@ struct CloudService {
         guard var components = URLComponents(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw CloudError(status: 0, message: "Invalid cloud URL")
         }
-        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let endpointPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = "/" + [basePath, endpointPath].filter { !$0.isEmpty }.joined(separator: "/")
-        guard let url = components.url else {
-            throw CloudError(status: 0, message: "Invalid cloud URL")
+        components.queryItems = nil
+        components.fragment = nil
+
+        let urls = try candidateURLs(baseComponents: components, endpointPath: path)
+        var firstNotFound: CloudError?
+
+        for url in urls {
+            do {
+                return try await sendRequest(
+                    url: url,
+                    method: method,
+                    token: token,
+                    body: body,
+                    responseType: ResponseBody.self
+                )
+            } catch let error as CloudError where error.status == 404 {
+                if firstNotFound == nil { firstNotFound = error }
+                continue
+            }
         }
 
+        throw firstNotFound ?? CloudError(status: 404, message: "not found")
+    }
+
+    private func candidateURLs(baseComponents: URLComponents, endpointPath: String) throws -> [URL] {
+        let basePath = baseComponents.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpointPath = endpointPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let paths = [
+            [basePath, endpointPath].filter { !$0.isEmpty }.joined(separator: "/"),
+            ["v1", endpointPath].filter { !$0.isEmpty }.joined(separator: "/"),
+            ["api", endpointPath].filter { !$0.isEmpty }.joined(separator: "/"),
+            endpointPath
+        ]
+
+        var urls: [URL] = []
+        for path in paths {
+            var components = baseComponents
+            components.path = "/" + path
+            guard let url = components.url else {
+                throw CloudError(status: 0, message: "Invalid cloud URL")
+            }
+            if !urls.contains(url) {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+
+    private func sendRequest<RequestBody: Encodable, ResponseBody: Decodable>(
+        url: URL,
+        method: String,
+        token: String?,
+        body: RequestBody?,
+        responseType: ResponseBody.Type
+    ) async throws -> ResponseBody {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -215,14 +310,29 @@ struct CloudService {
         }
         guard (200..<300).contains(http.statusCode) else {
             if let cloudError = try? Self.decoder.decode(CloudError.self, from: data) {
+                if http.statusCode == 404 {
+                    throw CloudError(status: http.statusCode, message: "\(cloudError.message) (\(url.absoluteString))")
+                }
                 throw cloudError
             }
-            throw CloudError(status: http.statusCode, message: HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
+            let message = HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+            if http.statusCode == 404 {
+                throw CloudError(status: http.statusCode, message: "\(message) (\(url.absoluteString))")
+            }
+            throw CloudError(status: http.statusCode, message: message)
         }
         if ResponseBody.self == EmptyResponse.self {
             return EmptyResponse() as! ResponseBody
         }
-        return try Self.decoder.decode(ResponseBody.self, from: data)
+        do {
+            return try Self.decoder.decode(ResponseBody.self, from: data)
+        } catch {
+            let body = String(data: data, encoding: .utf8) ?? "<non-UTF8 response>"
+            throw CloudError(
+                status: http.statusCode,
+                message: "Unexpected cloud response format: \(body.prefix(300))"
+            )
+        }
     }
 }
 
@@ -232,7 +342,13 @@ private struct AuthRequest: Encodable {
 }
 
 private struct DeviceRequest: Encodable {
-    var fcmToken: String
+    var platform = "fcm"
+    var token: String
+    var label = "ServerCase iOS"
+
+    init(fcmToken: String) {
+        self.token = fcmToken
+    }
 }
 
 private struct PutSyncRequest: Encodable {

@@ -25,6 +25,13 @@ struct FilesView: View {
     /// Directory the new folder will be created in; nil means the current path.
     @State private var newFolderParent: String?
     @State private var showImporter = false
+    @State private var sort = FileSort(column: .name, ascending: true)
+    @State private var tableColumnWidths = FileTableColumnWidths()
+    @State private var resizeDragStart: FileTableColumnWidths?
+    @State private var resizingColumn: FileSortColumn?
+    @State private var resizeDragDelta: CGFloat = 0
+    @State private var pathDraft = "."
+    @FocusState private var pathFieldFocused: Bool
 
     private static let maxEditBytes: Int64 = 512 * 1024
 
@@ -32,12 +39,41 @@ struct FilesView: View {
         model.service(server.id).map { RemoteFiles(service: $0) }
     }
 
+    private var sortedEntries: [RemoteFile] {
+        sorted(listing?.entries ?? [])
+    }
+
+    private var activeTableColumnWidths: FileTableColumnWidths {
+        guard let resizeDragStart, let resizingColumn else { return tableColumnWidths }
+        return resizeDragStart.resized(resizingColumn, by: resizeDragDelta)
+    }
+
+    private var pathCompletions: [String] {
+        let query = pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return ["/", "~", "."] }
+        var candidates = Set(["/", "~", "."])
+        let current = listing?.path ?? path
+        for entry in listing?.entries ?? [] where entry.isDirectory {
+            candidates.insert(files?.join(current, entry.name) ?? entry.path)
+        }
+        for (parent, children) in treeChildren {
+            candidates.insert(parent)
+            for child in children {
+                candidates.insert(child.path)
+            }
+        }
+        let matches = Array(candidates)
+            .filter { candidate in candidate != query && candidate.localizedCaseInsensitiveContains(query) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return Array(matches.prefix(8))
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             if horizontalSizeClass == .regular {
-                regularBrowser
+                adaptiveRegularBrowser
             } else {
                 compactBrowser
             }
@@ -75,6 +111,16 @@ struct FilesView: View {
         }
     }
 
+    private var adaptiveRegularBrowser: some View {
+        GeometryReader { proxy in
+            if proxy.size.width >= 820 {
+                regularBrowser
+            } else {
+                compactBrowser
+            }
+        }
+    }
+
     @ViewBuilder
     private var compactBrowser: some View {
         if loading && listing == nil {
@@ -94,7 +140,7 @@ struct FilesView: View {
             .redacted(reason: .placeholder)
         } else {
             List {
-                ForEach(listing?.entries ?? []) { entry in
+                ForEach(sortedEntries) { entry in
                     row(entry)
                 }
                 if (listing?.entries.isEmpty ?? false) {
@@ -133,34 +179,44 @@ struct FilesView: View {
 
                 Divider()
 
-                VStack(spacing: 0) {
-                    fileTableHeader
-                    Divider()
-                    ZStack(alignment: .top) {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                if loading && listing == nil {
-                                    ForEach(0..<12, id: \.self) { _ in
-                                        skeletonTableRow
+                GeometryReader { tableProxy in
+                    let layout = FileTableLayout(width: tableProxy.size.width, columnWidths: activeTableColumnWidths)
+                    ScrollView(.horizontal) {
+                        VStack(spacing: 0) {
+                            fileTableHeader(layout)
+                            Divider()
+                            ZStack(alignment: .top) {
+                                ScrollView {
+                                    LazyVStack(spacing: 0) {
+                                        if loading && listing == nil {
+                                            ForEach(0..<12, id: \.self) { _ in
+                                                skeletonTableRow(layout)
+                                            }
+                                        } else if (listing?.entries.isEmpty ?? false) {
+                                            Text("Empty directory.")
+                                                .foregroundStyle(.secondary)
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 36)
+                                        } else {
+                                            ForEach(sortedEntries) { entry in
+                                                tableRow(entry, layout: layout)
+                                            }
+                                        }
                                     }
-                                } else if (listing?.entries.isEmpty ?? false) {
-                                    Text("Empty directory.")
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 36)
-                                } else {
-                                    ForEach(listing?.entries ?? []) { entry in
-                                        tableRow(entry)
-                                    }
+                                }
+                                if loading && listing != nil {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                        .padding(8)
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
                                 }
                             }
                         }
-                        if loading && listing != nil {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
+                        .frame(width: layout.totalWidth)
+                    }
+                    .scrollDisabled(resizeDragStart != nil)
+                    .transaction { transaction in
+                        transaction.animation = nil
                     }
                 }
             }
@@ -208,64 +264,126 @@ struct FilesView: View {
         log.append(LogEntry(text: text, isError: isError))
     }
 
-    private var fileTableHeader: some View {
-        HStack(spacing: 12) {
-            Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-            Text("Size").frame(width: 88, alignment: .trailing)
-            Text("Type").frame(width: 110, alignment: .leading)
-            Text("Last modified").frame(width: 150, alignment: .leading)
-            Text("Permissions").frame(width: 86, alignment: .leading)
+    private func fileTableHeader(_ layout: FileTableLayout) -> some View {
+        HStack(spacing: layout.spacing) {
+            headerCell("Name", column: .name, width: layout.nameWidth, alignment: .leading)
+                .overlay(resizeHandle(for: .name), alignment: .trailing)
+            headerCell("Size", column: .size, width: layout.sizeWidth, alignment: .leading)
+                .overlay(resizeHandle(for: .size), alignment: .trailing)
+            headerCell("Type", column: .type, width: layout.typeWidth, alignment: .leading)
+                .overlay(resizeHandle(for: .type), alignment: .trailing)
+            headerCell("Last modified", column: .modified, width: layout.modifiedWidth, alignment: .leading)
+                .overlay(resizeHandle(for: .modified), alignment: .trailing)
+            headerCell("Permissions", column: .permissions, width: layout.permissionsWidth, alignment: .leading)
+                .overlay(resizeHandle(for: .permissions), alignment: .trailing)
         }
         .font(.caption.weight(.medium))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, layout.horizontalPadding)
         .padding(.vertical, 8)
     }
 
-    private var skeletonTableRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "doc.text").foregroundStyle(.secondary)
-            RoundedRectangle(cornerRadius: 4).fill(.secondary.opacity(0.18)).frame(height: 12)
-            RoundedRectangle(cornerRadius: 4).fill(.secondary.opacity(0.18)).frame(width: 70, height: 12)
+    private func headerCell(_ title: String, column: FileSortColumn, width: CGFloat, alignment: Alignment) -> some View {
+        Button {
+            updateSort(column)
+        } label: {
+            HStack(spacing: 4) {
+                Text(title).lineLimit(1)
+                if sort.column == column {
+                    Image(systemName: sort.ascending ? "chevron.up" : "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+            }
+            .padding(.trailing, FileTableLayout.resizeHandleWidth)
+            .frame(width: width, alignment: alignment)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12)
+        .buttonStyle(.plain)
+    }
+
+    private func resizeHandle(for column: FileSortColumn) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(.secondary.opacity(resizingColumn == column ? 0.28 : 0.12))
+                .frame(width: 2)
+                .frame(maxHeight: .infinity)
+        }
+        .frame(width: FileTableLayout.resizeHandleWidth, height: 28)
+        .contentShape(Rectangle())
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    if resizeDragStart == nil {
+                        resizeDragStart = tableColumnWidths
+                        resizingColumn = column
+                    }
+                    resizeDragDelta = value.translation.width
+                }
+                .onEnded { value in
+                    if let resizeDragStart, let resizingColumn {
+                        tableColumnWidths = resizeDragStart.resized(resizingColumn, by: value.translation.width)
+                    }
+                    resizeDragStart = nil
+                    resizingColumn = nil
+                    resizeDragDelta = 0
+                }
+        )
+    }
+
+    private func skeletonTableRow(_ layout: FileTableLayout) -> some View {
+        HStack(spacing: layout.spacing) {
+            Image(systemName: "doc.text")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(.secondary.opacity(0.18))
+                .frame(width: max(40, layout.nameWidth - 26), height: 12)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(.secondary.opacity(0.18))
+                .frame(width: 70, height: 12)
+        }
+        .padding(.horizontal, layout.horizontalPadding)
         .padding(.vertical, 8)
         .redacted(reason: .placeholder)
     }
 
-    private func tableRow(_ entry: RemoteFile) -> some View {
+    private func tableRow(_ entry: RemoteFile, layout: FileTableLayout) -> some View {
         Button {
             selectedPath = entry.path
             open(entry)
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: layout.spacing) {
                 HStack(spacing: 8) {
                     Image(systemName: icon(entry))
                         .foregroundStyle(entry.isDirectory ? Palette.warn : .secondary)
+                        .frame(width: 18)
                     Text(entry.name)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(.tail)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: layout.nameWidth, alignment: .leading)
 
                 Text(entry.isDirectory ? "" : Format.bytes(Double(entry.sizeBytes)))
-                    .frame(width: 88, alignment: .trailing)
+                    .frame(width: layout.sizeWidth, alignment: .leading)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Text(typeLabel(entry))
-                    .frame(width: 110, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(width: layout.typeWidth, alignment: .leading)
                     .foregroundStyle(.secondary)
                 Text(entry.modifiedAt.formatted(date: .numeric, time: .shortened))
-                    .frame(width: 150, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(width: layout.modifiedWidth, alignment: .leading)
                     .foregroundStyle(.secondary)
                 Text(entry.mode)
                     .font(.system(.caption, design: .monospaced))
-                    .frame(width: 86, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(width: layout.permissionsWidth, alignment: .leading)
                     .foregroundStyle(.secondary)
             }
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, layout.horizontalPadding)
         .padding(.vertical, 7)
         .background(selectedPath == entry.path ? Palette.accent.opacity(0.18) : Color.clear)
         .contextMenu {
@@ -290,12 +408,46 @@ struct FilesView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Button { Task { await goUp() } } label: { Image(systemName: "arrow.up") }
-            Text(listing?.path ?? path)
-                .font(.system(.footnote, design: .monospaced))
-                .lineLimit(1).truncationMode(.head)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                Button { Task { await goUp() } } label: { Image(systemName: "arrow.up") }
+                TextField("Remote path", text: $pathDraft)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.go)
+                    .focused($pathFieldFocused)
+                    .onSubmit { submitPathDraft() }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Palette.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button { submitPathDraft() } label: { Image(systemName: "arrow.right.circle") }
+                    .disabled(pathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if pathFieldFocused && !pathCompletions.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(pathCompletions, id: \.self) { suggestion in
+                            Button {
+                                applyPathCompletion(suggestion)
+                            } label: {
+                                Text(suggestion)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.head)
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Palette.surface.opacity(0.8))
+                                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 1)
+                }
+            }
         }
         .padding(.horizontal).padding(.vertical, 8)
     }
@@ -350,6 +502,19 @@ struct FilesView: View {
 
     // MARK: Actions
 
+    private func submitPathDraft() {
+        let target = pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return }
+        pathFieldFocused = false
+        Task { await load(target) }
+    }
+
+    private func applyPathCompletion(_ suggestion: String) {
+        pathDraft = suggestion
+        pathFieldFocused = false
+        Task { await load(suggestion) }
+    }
+
     private func load(_ target: String) async {
         guard let files else { return }
         loading = true
@@ -358,6 +523,7 @@ struct FilesView: View {
             let result = try await files.list(target)
             listing = result
             path = result.path
+            pathDraft = result.path
             selectedPath = nil
             await updateTreeCache(for: result)
             appendLog("Listing \(result.path) — \(result.entries.count) items")
@@ -584,6 +750,47 @@ struct FilesView: View {
         if entry.isDirectory { return "\(entry.mode) · \(when)" }
         return "\(Format.bytes(Double(entry.sizeBytes))) · \(entry.mode) · \(when)"
     }
+
+    private func updateSort(_ column: FileSortColumn) {
+        if sort.column == column {
+            sort.ascending.toggle()
+        } else {
+            sort = FileSort(column: column, ascending: true)
+        }
+    }
+
+    private func sorted(_ entries: [RemoteFile]) -> [RemoteFile] {
+        entries.sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory {
+                return lhs.isDirectory
+            }
+
+            let orderedAscending: Bool
+            switch sort.column {
+            case .name:
+                orderedAscending = lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            case .size:
+                orderedAscending = lhs.sizeBytes == rhs.sizeBytes
+                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    : lhs.sizeBytes < rhs.sizeBytes
+            case .type:
+                let leftType = typeLabel(lhs)
+                let rightType = typeLabel(rhs)
+                orderedAscending = leftType == rightType
+                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    : leftType.localizedCaseInsensitiveCompare(rightType) == .orderedAscending
+            case .modified:
+                orderedAscending = lhs.modifiedAt == rhs.modifiedAt
+                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    : lhs.modifiedAt < rhs.modifiedAt
+            case .permissions:
+                orderedAscending = lhs.mode == rhs.mode
+                    ? lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+                    : lhs.mode < rhs.mode
+            }
+            return sort.ascending ? orderedAscending : !orderedAscending
+        }
+    }
 }
 
 private func ancestorPaths(_ path: String) -> [String] {
@@ -595,6 +802,69 @@ private func ancestorPaths(_ path: String) -> [String] {
         out.append(current)
     }
     return out
+}
+
+private enum FileSortColumn: Equatable {
+    case name
+    case size
+    case type
+    case modified
+    case permissions
+}
+
+private struct FileSort: Equatable {
+    var column: FileSortColumn
+    var ascending: Bool
+}
+
+private struct FileTableColumnWidths: Equatable {
+    var name: CGFloat = 260
+    var size: CGFloat = 104
+    var type: CGFloat = 112
+    var modified: CGFloat = 152
+    var permissions: CGFloat = 96
+
+    func resized(_ column: FileSortColumn, by delta: CGFloat) -> Self {
+        var copy = self
+        switch column {
+        case .name:
+            copy.name = clamp(name + delta, min: 140, max: 520)
+        case .size:
+            copy.size = clamp(size + delta, min: 86, max: 170)
+        case .type:
+            copy.type = clamp(type + delta, min: 82, max: 220)
+        case .modified:
+            copy.modified = clamp(modified + delta, min: 118, max: 240)
+        case .permissions:
+            copy.permissions = clamp(permissions + delta, min: 74, max: 160)
+        }
+        return copy
+    }
+
+    private func clamp(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
+        Swift.min(Swift.max(value, min), max)
+    }
+}
+
+private struct FileTableLayout {
+    static let resizeHandleWidth: CGFloat = 24
+
+    let width: CGFloat
+    let columnWidths: FileTableColumnWidths
+
+    var spacing: CGFloat { width >= 640 ? 12 : 8 }
+    var horizontalPadding: CGFloat { width >= 640 ? 12 : 10 }
+    var nameWidth: CGFloat { columnWidths.name }
+    var sizeWidth: CGFloat { columnWidths.size }
+    var typeWidth: CGFloat { columnWidths.type }
+    var modifiedWidth: CGFloat { columnWidths.modified }
+    var permissionsWidth: CGFloat { columnWidths.permissions }
+    var totalWidth: CGFloat {
+        max(
+            width,
+            nameWidth + sizeWidth + typeWidth + modifiedWidth + permissionsWidth + spacing * 4 + horizontalPadding * 2
+        )
+    }
 }
 
 private struct FileTreeNode: View {

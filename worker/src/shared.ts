@@ -42,6 +42,12 @@ export interface ProbeSnapshot {
   };
   disks: unknown[];
   network: Record<string, unknown>;
+  security_updates?: {
+    available: boolean | null;
+    count: number | null;
+    source: string;
+    checked_at_ms: number;
+  } | null;
 }
 
 /**

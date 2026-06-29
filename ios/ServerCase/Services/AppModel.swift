@@ -7,8 +7,8 @@ import SwiftUI
 @MainActor
 final class AppModel: ObservableObject {
     @Published var servers: [ServerConfig] = ServerStore.load()
-    @Published var connState: [UUID: ConnectionState] = [:]
-    @Published var status: [UUID: ServerStatus] = [:]
+    @Published var connState: [String: ConnectionState] = [:]
+    @Published var status: [String: ServerStatus] = [:]
     @Published var settings: GlobalSettings = SettingsStore.load()
     @Published var bitwardenStatus: BitwardenStatus?
     @Published var cloudSession: CloudSession? = CloudSessionStore.load()
@@ -17,9 +17,9 @@ final class AppModel: ObservableObject {
     let vault = BitwardenVault()
     private let cloud = CloudService()
 
-    private var services: [UUID: SSHService] = [:]
-    private var collectors: [UUID: StatusParser.CollectorState] = [:]
-    private var connectionTokens: [UUID: UUID] = [:]
+    private var services: [String: SSHService] = [:]
+    private var collectors: [String: StatusParser.CollectorState] = [:]
+    private var connectionTokens: [String: UUID] = [:]
     private var pollTask: Task<Void, Never>?
     private var cloudPushTask: Task<Void, Never>?
     private var probeStreamTask: URLSessionWebSocketTask?
@@ -51,7 +51,7 @@ final class AppModel: ObservableObject {
         }
         saveServers()
         if vaultEnabled {
-            Task { try? await vault.setSecrets(server.id.uuidString, server.secrets) }
+            Task { try? await vault.setSecrets(server.id, server.secrets) }
         }
     }
 
@@ -60,11 +60,11 @@ final class AppModel: ObservableObject {
         servers.removeAll { $0.id == server.id }
         saveServers()
         if vaultEnabled {
-            Task { try? await vault.deleteSecrets(server.id.uuidString) }
+            Task { try? await vault.deleteSecrets(server.id) }
         }
     }
 
-    func state(_ id: UUID) -> ConnectionState { connState[id] ?? .disconnected }
+    func state(_ id: String) -> ConnectionState { connState[id] ?? .disconnected }
 
     /// Persists the server list, stripping secrets when the vault owns them.
     private func saveServers() {
@@ -95,7 +95,7 @@ final class AppModel: ObservableObject {
         Task {
             var cfg = server
             if vaultEnabled, server.password == nil, server.privateKey == nil,
-               let secrets = try? await vault.getSecrets(server.id.uuidString) {
+               let secrets = try? await vault.getSecrets(server.id) {
                 cfg = server.merging(secrets)
             }
             let service = SSHService(config: cfg)
@@ -116,7 +116,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func disconnect(_ id: UUID) {
+    func disconnect(_ id: String) {
         connectionTokens[id] = nil
         if let service = services[id] {
             Task { await service.disconnect() }
@@ -126,7 +126,7 @@ final class AppModel: ObservableObject {
         connState[id] = .disconnected
     }
 
-    func service(_ id: UUID) -> SSHService? { services[id] }
+    func service(_ id: String) -> SSHService? { services[id] }
 
     private func connectedService(for server: ServerConfig) async throws -> SSHService {
         if let service = services[server.id], await service.isConnected {
@@ -135,7 +135,7 @@ final class AppModel: ObservableObject {
 
         var cfg = server
         if vaultEnabled, server.password == nil, server.privateKey == nil,
-           let secrets = try? await vault.getSecrets(server.id.uuidString) {
+           let secrets = try? await vault.getSecrets(server.id) {
             cfg = server.merging(secrets)
         }
 
@@ -156,7 +156,7 @@ final class AppModel: ObservableObject {
 
     // MARK: Status polling
 
-    func startPolling(_ id: UUID) {
+    func startPolling(_ id: String) {
         pollTask?.cancel()
         if servers.first(where: { $0.id == id })?.probeHostId != nil {
             startProbeStream()
@@ -175,7 +175,7 @@ final class AppModel: ObservableObject {
         pollTask = nil
     }
 
-    private func pollOnce(_ id: UUID) async {
+    private func pollOnce(_ id: String) async {
         guard let service = services[id] else { return }
         let collector = collectors[id] ?? StatusParser.CollectorState()
         collectors[id] = collector
@@ -229,14 +229,14 @@ final class AppModel: ObservableObject {
     func loadSecretsFromVault() async {
         guard let all = try? await vault.listSecrets() else { return }
         for i in servers.indices {
-            if let s = all[servers[i].id.uuidString] {
+            if let s = all[servers[i].id] {
                 servers[i] = servers[i].merging(s)
             }
         }
     }
 
     func pushAllSecretsToVault() async throws {
-        for s in servers { try await vault.setSecrets(s.id.uuidString, s.secrets) }
+        for s in servers { try await vault.setSecrets(s.id, s.secrets) }
         try? await vault.sync()
         saveServers()
     }
@@ -258,9 +258,16 @@ final class AppModel: ObservableObject {
         let session = CloudSession(token: result.token, expiresAt: result.expiresAt, user: result.user)
         cloudSession = session
         CloudSessionStore.save(session)
+        do {
+            try await cloudPull()
+        } catch let error as CloudError where error.status == 404 {
+            // Fresh cloud accounts have no snapshot yet; keep the local config.
+        }
         var next = settings
         next.cloud.email = result.user.email
+        applyingRemote = true
         updateSettings(next)
+        applyingRemote = false
         registerPushToken()
         await refreshProbes()
         startProbeStream()
@@ -445,6 +452,16 @@ final class AppModel: ObservableObject {
         saveServers()
     }
 
+    /// One-tap install for a server's Overview: creates a cloud probe named
+    /// after the host, installs it over SSH, links it, and returns the install
+    /// log. Mirrors the desktop dashboard's "Install probe" button.
+    @discardableResult
+    func installProbeAuto(on server: ServerConfig) async throws -> String {
+        let host = server.host.trimmingCharacters(in: .whitespaces)
+        let result = try await createProbe(name: host.isEmpty ? server.name : host)
+        return try await installProbe(hostId: result.host.id, token: result.token, on: server)
+    }
+
     func installProbe(hostId: String, token: String, on server: ServerConfig) async throws -> String {
         let service = try await connectedService(for: server)
         let output = try await service.run(probeInstallCommand(apiURL: settings.cloud.url, token: token, hostName: server.host))
@@ -479,7 +496,7 @@ final class AppModel: ObservableObject {
     }
 }
 
-private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/main/probe/deploy/install.sh"
+private let probeInstallScriptURL = "https://raw.githubusercontent.com/qwe7002/servercase/refs/heads/main/probe/deploy/install.sh"
 
 private func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -491,7 +508,7 @@ private func probeInstallCommand(apiURL: String, token: String, hostName: String
         "tmp=\"$(mktemp)\"",
         "if command -v curl >/dev/null 2>&1; then curl -fsSL \(shellQuote(probeInstallScriptURL)) -o \"$tmp\"; elif command -v wget >/dev/null 2>&1; then wget -O \"$tmp\" \(shellQuote(probeInstallScriptURL)); else echo \"need curl or wget\"; exit 1; fi",
         "chmod 700 \"$tmp\"",
-        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip",
+        "bash \"$tmp\" --user-service --api \(shellQuote(apiURL)) --token \(shellQuote(token)) --name \(shellQuote(hostName)) --interval 10 --public-ip --security-updates",
         "rm -f \"$tmp\"",
     ].joined(separator: "; ")
 }

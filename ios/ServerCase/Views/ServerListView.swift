@@ -92,6 +92,11 @@ struct ServerListView: View {
             ServerRow(server: server)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+                model.reconnect(server)
+            }
+        )
         .serverRowActions(server, model: model, editing: $editing)
     }
 
@@ -115,36 +120,48 @@ struct ServerSplitView: View {
     @State private var addingNew = false
     @State private var showingSettings = false
     @State private var searchText = ""
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    @State private var splitWidth: CGFloat = 0
     @State private var collapsedGroupIDs: Set<String> = []
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar
-                .navigationTitle("ServerCase")
-                .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
-                .searchable(text: $searchText, prompt: "Search servers")
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+        GeometryReader { proxy in
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                sidebar
+                    .navigationTitle("ServerCase")
+                    .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 380)
+                    .searchable(text: $searchText, prompt: "Search servers")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button { addingNew = true } label: { Image(systemName: "plus") }
+                        }
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { addingNew = true } label: { Image(systemName: "plus") }
-                    }
+            } detail: {
+                if let selectedServer {
+                    DashboardView(server: selectedServer)
+                } else {
+                    ContentUnavailableView(
+                        "Select a server",
+                        systemImage: "server.rack",
+                        description: Text("Choose a server from the sidebar.")
+                    )
                 }
-        } detail: {
-            if let selectedServer {
-                DashboardView(server: selectedServer)
-            } else {
-                ContentUnavailableView(
-                    "Select a server",
-                    systemImage: "server.rack",
-                    description: Text("Choose a server from the sidebar.")
-                )
+            }
+            .navigationSplitViewStyle(.balanced)
+            .onAppear {
+                splitWidth = proxy.size.width
+                updateColumnVisibility(for: proxy.size.width)
+            }
+            .onChange(of: proxy.size.width) { _, width in
+                splitWidth = width
+                updateColumnVisibility(for: width)
             }
         }
-        .navigationSplitViewStyle(.balanced)
         .onChange(of: selectedServerID) { _, newValue in
+            updateColumnVisibility(for: splitWidth)
             guard let server = model.servers.first(where: { $0.id == newValue }) else { return }
             model.connectIfNeeded(server)
         }
@@ -188,6 +205,11 @@ struct ServerSplitView: View {
         }
     }
 
+    private func updateColumnVisibility(for width: CGFloat) {
+        guard width > 0 else { return }
+        columnVisibility = selectedServerID == nil || width >= 1100 ? .all : .detailOnly
+    }
+
     private var selectedServer: ServerConfig? {
         model.servers.first { $0.id == selectedServerID }
     }
@@ -205,6 +227,11 @@ struct ServerSplitView: View {
     private func row(_ server: ServerConfig) -> some View {
         ServerRow(server: server)
             .tag(server.id)
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    model.reconnect(server)
+                }
+            )
             .serverRowActions(server, model: model, editing: $editing)
     }
 

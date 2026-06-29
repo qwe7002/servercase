@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Activity, Copy, Plus, RadioTower, Server, Trash2 } from 'lucide-react';
+import { Activity, Server, Trash2 } from 'lucide-react';
 import { useSettings } from '../store/settings';
 import { useCloud } from '../store/cloud';
 import { useProbes, type ProbeHostView } from '../store/probes';
-import { cloudApi, CloudError } from '../lib/cloud';
+import { cloudApi } from '../lib/cloud';
 import type { StreamStatus } from '../lib/cloudStream';
 import { formatKb, formatUptime, percent } from '../format';
 
@@ -28,31 +26,13 @@ export function CloudProbes() {
   const token = useCloud((s) => s.token);
   const hosts = useProbes((s) => s.hosts);
   const status = useProbes((s) => s.streamStatus);
-  const setHosts = useProbes((s) => s.setHosts);
   const removeProbeHost = useProbes((s) => s.removeHost);
 
-  const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [newToken, setNewToken] = useState<{
-    id: string;
-    name: string;
-    token: string;
-  } | null>(null);
   // Re-render once a second so "last seen" stays fresh.
   const [, force] = useState(0);
   const tickRef = useRef(0);
-
-  const refresh = async () => {
-    if (!token) return;
-    try {
-      const res = await cloudApi.listProbes(url, token);
-      setHosts(res.hosts);
-      setErr(null);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  };
 
   // Re-render once a second so relative timestamps stay fresh.
   useEffect(() => {
@@ -61,22 +41,6 @@ export function CloudProbes() {
       clearInterval(ticker);
     };
   }, []);
-
-  const addHost = async () => {
-    if (!token || !name.trim()) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const res = await cloudApi.createProbe(url, token, name.trim());
-      setNewToken({ id: res.host.id, name: res.host.name, token: res.token });
-      setName('');
-      await refresh();
-    } catch (e) {
-      setErr(e instanceof CloudError ? e.message : (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const removeHost = async (id: string) => {
     if (!token) return;
@@ -98,56 +62,24 @@ export function CloudProbes() {
         <StreamBadge status={status} />
       </div>
 
-      <div className="flex gap-2">
-        <Input
-          placeholder="New host name, e.g. web-1"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void addHost()}
-        />
-        <Button onClick={() => void addHost()} disabled={busy || !name.trim()}>
-          <Plus /> Create token
-        </Button>
-      </div>
-
-      {newToken && (
-        <Alert>
-          <RadioTower className="size-4" />
-          <AlertTitle>Manual probe token for “{newToken.name}”</AlertTitle>
-          <AlertDescription className="grid gap-2">
-            <p className="text-xs text-muted-foreground">
-              Copy it now — it is shown only once. For automatic installation,
-              open a server Overview and use Install probe. Manual deploy uses{' '}
-              <code>probe/deploy/install.sh --token …</code>.
-            </p>
-            <div className="flex gap-2">
-              <Input readOnly value={newToken.token} className="font-mono text-xs" />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => void navigator.clipboard?.writeText(newToken.token)}
-              >
-                <Copy />
-              </Button>
-            </div>
-            <div>
-              <Button variant="ghost" size="sm" onClick={() => setNewToken(null)}>
-                Done
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
+      <p className="px-1 text-xs text-muted-foreground">
+        Probes are installed automatically over SSH — open a server Overview and
+        use Install probe. There is no manual token registration.
+      </p>
 
       {hosts.length === 0 ? (
         <p className="px-1 py-2 text-sm text-muted-foreground">
-          No probe hosts yet. Install one from a server Overview, or create a
-          manual token here.
+          No probe hosts yet. Install one from a server Overview.
         </p>
       ) : (
         <div className="grid gap-2">
           {hosts.map((h) => (
-            <HostCard key={h.id} host={h} onRemove={() => void removeHost(h.id)} />
+            <HostCard
+              key={h.id}
+              host={h}
+              busy={busy}
+              onRemove={() => void removeHost(h.id)}
+            />
           ))}
         </div>
       )}
@@ -171,7 +103,15 @@ function StreamBadge({ status }: { status: StreamStatus }) {
   );
 }
 
-function HostCard({ host, onRemove }: { host: ProbeHostView; onRemove: () => void }) {
+function HostCard({
+  host,
+  busy,
+  onRemove,
+}: {
+  host: ProbeHostView;
+  busy: boolean;
+  onRemove: () => void;
+}) {
   const snap = host.snapshot;
   // Online if a snapshot arrived within ~3 intervals.
   const online = !!host.lastSeenAt && Date.now() - host.lastSeenAt < 30_000;
@@ -219,6 +159,7 @@ function HostCard({ host, onRemove }: { host: ProbeHostView; onRemove: () => voi
             variant="ghost"
             className="text-muted-foreground hover:text-destructive"
             onClick={onRemove}
+            disabled={busy}
             title="Remove host"
           >
             <Trash2 className="size-4" />

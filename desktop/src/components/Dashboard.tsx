@@ -119,35 +119,14 @@ export function Dashboard({ server }: Props) {
             {probeStatus ? ` · probe: ${probeHost?.name ?? 'linked'}` : ''}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
-            <TabsList>
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="terminal">Terminal</TabsTrigger>
-              <TabsTrigger value="files">Files</TabsTrigger>
-              <TabsTrigger value="forwarding">Forwarding</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {!usesProbe && (
-            <Button
-              variant="outline"
-              onClick={() => void installProbe()}
-              disabled={!canInstallProbe}
-              title={
-                canInstallProbe
-                  ? 'Install probe on this server'
-                  : 'Sign in to ServerCase Cloud first'
-              }
-            >
-              {installingProbe ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <RadioTower />
-              )}
-              {installingProbe ? 'Installing…' : 'Install probe'}
-            </Button>
-          )}
-        </div>
+        <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)}>
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="terminal">Terminal</TabsTrigger>
+            <TabsTrigger value="files">Files</TabsTrigger>
+            <TabsTrigger value="forwarding">Forwarding</TabsTrigger>
+          </TabsList>
+        </Tabs>
       </header>
 
       {connState === 'error' && lastError && (
@@ -213,6 +192,23 @@ export function Dashboard({ server }: Props) {
                   Install a lightweight probe on this server to keep Overview
                   updated without SSH polling.
                 </span>
+                <Button
+                  variant="outline"
+                  onClick={() => void installProbe()}
+                  disabled={!canInstallProbe}
+                  title={
+                    canInstallProbe
+                      ? 'Install probe on this server'
+                      : 'Sign in to ServerCase Cloud first'
+                  }
+                >
+                  {installingProbe ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <RadioTower />
+                  )}
+                  {installingProbe ? 'Installing…' : 'Install probe'}
+                </Button>
               </AlertDescription>
             </Alert>
           )}

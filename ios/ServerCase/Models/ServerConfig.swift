@@ -8,7 +8,7 @@ enum AuthType: String, Codable, CaseIterable, Identifiable {
 }
 
 struct ServerConfig: Identifiable, Codable, Equatable, Hashable {
-    var id: UUID = UUID()
+    var id: String = UUID().uuidString
     var name: String
     var host: String
     var port: Int = 22

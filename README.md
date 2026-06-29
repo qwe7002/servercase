@@ -12,7 +12,7 @@ standalone, idiomatic implementation for its platform that shares the
 | MCP server | Node + TypeScript | [`ssh2`](https://github.com/mscdex/ssh2) | [`mcp/`](mcp) |
 | Probe agent | Rust | local Linux `/proc` | [`probe/`](probe) |
 | Cloud worker | Cloudflare Workers + TypeScript + D1 | — | [`worker/`](worker) |
-| Probe deploy | `systemd` + `websocat` installer | — | [`probe/deploy/`](probe/deploy) |
+| Probe deploy | `systemd` + `curl` (HTTP) installer | — | [`probe/deploy/`](probe/deploy) |
 
 The [`mcp/`](mcp) package is a [Model Context Protocol](https://modelcontextprotocol.io)
 server that lets an AI assistant manage your servers (run command, status,
@@ -28,10 +28,11 @@ visibility without moving SSH credentials out of ServerCase.
 
 The [`worker/`](worker) package is that **Cloudflare Worker** — the thin cloud
 side. After logging in (email + password), a client can sync its secret-free
-config across devices and read probe status; the probe agent streams
-`servercase.probe.v1` snapshots over per-host tokens — by default a WebSocket
-backed by a per-host Durable Object (hibernating, so idle links are free), with
-an HTTP fallback. It also delivers **push notifications** for threshold alerts
+config across devices and read probe status; the probe agent reports
+`servercase.probe.v1` snapshots over per-host tokens — installed probes `POST`
+each snapshot to `/v1/ingest` over HTTPS, and the worker also accepts a
+streaming WebSocket (`/v1/ingest/ws`) backed by a per-host Durable Object
+(hibernating, so idle links are free). It also delivers **push notifications** for threshold alerts
 (CPU / memory / disk) over Firebase Cloud Messaging to a user's registered
 devices, and serves a **web management panel** at `/` (sign in, live hosts,
 tokens, devices). Secrets stay in ServerCase: the worker stores only secret-free
@@ -39,9 +40,10 @@ server definitions, and the Bitwarden API key is redacted before upload. See its
 [README](worker/README.md).
 
 The [`probe/deploy/`](probe/deploy) package automates putting a probe on a host: a single
-`install.sh` fetches the agent and `websocat`, optionally registers the host to
-mint its token, and installs a hardened `systemd` service that streams to the
-worker over WebSocket and reconnects on drop. See its [README](probe/deploy/README.md).
+`install.sh` fetches the agent, optionally registers the host to mint its token,
+and installs a hardened `systemd` service that `POST`s snapshots to the worker
+over HTTPS with `curl` (no `websocat` needed) and restarts on drop. See its
+[README](probe/deploy/README.md).
 
 ## Shared design
 

@@ -57,6 +57,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     private val collectors = HashMap<String, StatusParser.CollectorState>()
     private var pollJob: Job? = null
     private var cloudPushJob: Job? = null
+    private var applyingRemote = false
 
     /** Latest FCM token and the one we've already registered, to avoid repeats. */
     private var fcmToken: String? = null
@@ -124,7 +125,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun saveServers(list: List<ServerConfig>) {
         repo.save(if (vaultEnabled()) list.map { it.strippingSecrets() } else list)
-        scheduleCloudAutoPush()
+        if (!applyingRemote) scheduleCloudAutoPush()
     }
 
     // --- Connection -------------------------------------------------------
@@ -150,6 +151,11 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         clients.remove(id)?.disconnect()
         collectors.remove(id)
         setState(id, ConnectionState.DISCONNECTED)
+    }
+
+    fun reconnect(server: ServerConfig) = viewModelScope.launch {
+        disconnect(server.id)
+        connect(server)
     }
 
     fun client(id: String): SshClient? = clients[id]
@@ -189,7 +195,7 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         // Re-persist servers so secrets are stripped (vault on) or restored (off).
         val list = _ui.value.servers
         repo.save(if (settings.bitwarden.enabled) list.map { it.strippingSecrets() } else list)
-        scheduleCloudAutoPush()
+        if (!applyingRemote) scheduleCloudAutoPush()
     }
 
     fun setMessage(message: String?) = _ui.update { it.copy(settingsMessage = message) }
@@ -255,9 +261,31 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         val url = _ui.value.settings.cloud.url
         try {
             val res = if (register) cloud.register(url, email, password) else cloud.login(url, email, password)
-            cloudRepo.save(CloudSession(token = res.token, expiresAt = res.expiresAt, user = res.user))
-            val s = _ui.value.settings
-            updateSettings(s.copy(cloud = s.cloud.copy(email = res.user.email)))
+            val session = CloudSession(token = res.token, expiresAt = res.expiresAt, user = res.user)
+            cloudRepo.save(session)
+            var pulledSettings: GlobalSettings? = null
+            runCatching { cloud.getSync(url, session.token) }
+                .onSuccess { sync ->
+                    applyingRemote = true
+                    try {
+                        repo.save(sync.payload.servers)
+                        settingsRepo.save(sync.payload.settings)
+                    } finally {
+                        applyingRemote = false
+                    }
+                    cloudRepo.save(session.copy(syncVersion = sync.version, syncedAt = sync.updatedAt))
+                    pulledSettings = sync.payload.settings
+                }
+                .onFailure {
+                    if (it !is CloudException || it.status != 404) throw it
+                }
+            val s = pulledSettings ?: _ui.value.settings
+            applyingRemote = true
+            try {
+                settingsRepo.save(s.copy(cloud = s.cloud.copy(email = res.user.email)))
+            } finally {
+                applyingRemote = false
+            }
             setMessage(if (register) "Account created." else "Signed in.")
         } catch (e: Exception) {
             setMessage(cloudError(e))
@@ -289,8 +317,13 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
         }
         try {
             val res = cloud.getSync(_ui.value.settings.cloud.url, session.token)
-            repo.save(res.payload.servers)
-            settingsRepo.save(res.payload.settings)
+            applyingRemote = true
+            try {
+                repo.save(res.payload.servers)
+                settingsRepo.save(res.payload.settings)
+            } finally {
+                applyingRemote = false
+            }
             cloudRepo.save(session.copy(syncVersion = res.version, syncedAt = res.updatedAt))
             setMessage("Pulled from cloud.")
         } catch (e: Exception) {

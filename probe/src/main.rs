@@ -58,6 +58,10 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
                 options.public_ip = true;
                 index += 1;
             }
+            "--security-updates" => {
+                options.security_updates = true;
+                index += 1;
+            }
             "--interval" => {
                 let Some(value) = args.get(index + 1) else {
                     return Err("--interval requires seconds".to_string());
@@ -80,6 +84,6 @@ fn parse_args(args: &[String]) -> Result<Config, String> {
 
 fn print_help() {
     println!(
-        "servercase-probe\n\nUsage:\n  servercase-probe --once [--public-ip]\n  servercase-probe --interval <seconds> [--public-ip]\n\nFlags:\n  --once             emit a single snapshot\n  --interval <secs>  emit one snapshot per interval\n  --public-ip        also look up the host's public IPv4/IPv6 (needs outbound\n                     internet and curl/wget; cached for a few minutes)\n\nThe probe prints ServerCase probe v1 JSON snapshots to stdout. A future\nCloudflare Worker can receive the same payload over HTTPS."
+        "servercase-probe\n\nUsage:\n  servercase-probe --once [--public-ip] [--security-updates]\n  servercase-probe --interval <seconds> [--public-ip] [--security-updates]\n\nFlags:\n  --once              emit a single snapshot\n  --interval <secs>   emit one snapshot per interval\n  --public-ip         also look up the host's public IPv4/IPv6 (needs outbound\n                      internet and curl/wget; cached for a few minutes)\n  --security-updates  best-effort check for pending security updates via apt,\n                      dnf or yum; cached for several hours\n\nThe probe prints ServerCase probe v1 JSON snapshots to stdout. A future\nCloudflare Worker can receive the same payload over HTTPS."
     );
 }
