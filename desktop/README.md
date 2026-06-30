@@ -120,6 +120,8 @@ npm run dev              # Vite dev server + Electron with HMR
 
 ```bash
 npm run typecheck        # tsc --noEmit (renderer + electron)
-npm run build            # renderer → dist/, main/preload → dist-electron/
-npm start                # run the built app
+npm run compile          # renderer → dist/, main/preload → dist-electron/
+npm run pack             # build an unpacked Electron app in release/
+npm run build            # package Electron app installers/archives in release/
+npm start                # run the compiled app without packaging
 ```

@@ -1,3 +1,5 @@
 /probe/target/
 /native/target/
 .idea/
+desktop/package.json
+.DS_Store

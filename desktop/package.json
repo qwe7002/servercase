@@ -8,10 +8,45 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "compile": "tsc --noEmit && vite build",
+    "build": "npm run compile && electron-builder",
+    "pack": "npm run compile && electron-builder --dir",
     "typecheck": "tsc --noEmit",
     "start": "electron .",
     "preview": "vite preview"
+  },
+  "build": {
+    "appId": "com.servercase.desktop",
+    "productName": "ServerCase",
+    "icon": "assets/icon.png",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "assets/**/*",
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
@@ -42,6 +77,7 @@
     "@types/ssh2": "^1.15.1",
     "@vitejs/plugin-react": "^4.3.2",
     "electron": "^42.5.0",
+    "electron-builder": "^26.0.12",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
