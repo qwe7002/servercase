@@ -258,11 +258,19 @@ final class AppModel: ObservableObject {
         let session = CloudSession(token: result.token, expiresAt: result.expiresAt, user: result.user)
         cloudSession = session
         CloudSessionStore.save(session)
-        do {
-            try await cloudPull()
-        } catch let error as CloudError where error.status == 404 {
-            // Fresh cloud accounts have no snapshot yet; keep the local config.
-        }
+        var authSettings = settings
+        authSettings.cloud.email = result.user.email
+        applyingRemote = true
+        updateSettings(authSettings)
+        applyingRemote = false
+        let payload = SyncService.makePayload(servers: servers, settings: settings)
+        let sync = try await cloud.putSync(url: url, token: result.token,
+                                           payload: payload, baseVersion: nil, merge: true)
+        applyingRemote = true
+        servers = sync.payload.servers
+        updateSettings(sync.payload.settings)
+        applyingRemote = false
+        updateCloudSyncState(session, version: sync.version, at: sync.updatedAt)
         var next = settings
         next.cloud.email = result.user.email
         applyingRemote = true

@@ -17,7 +17,7 @@ data class CloudAuthResponse(val user: CloudUser, val token: String, val expires
 data class CloudSyncResponse(val version: Int, val updatedAt: Long, val payload: SyncPayload)
 
 @Serializable
-data class CloudPutResult(val version: Int, val updatedAt: Long)
+data class CloudPutResult(val version: Int, val updatedAt: Long, val payload: SyncPayload)
 
 /**
  * Minimal REST client for the ServerCase Worker: account auth and config sync,
@@ -32,7 +32,11 @@ class CloudClient {
     private data class Credentials(val email: String, val password: String)
 
     @Serializable
-    private data class PutSyncBody(val payload: SyncPayload, val baseVersion: Int? = null)
+    private data class PutSyncBody(
+        val payload: SyncPayload,
+        val baseVersion: Int? = null,
+        val merge: Boolean = false,
+    )
 
     @Serializable
     private data class RegisterDeviceBody(val platform: String, val token: String, val label: String? = null)
@@ -54,8 +58,14 @@ class CloudClient {
     suspend fun getSync(url: String, token: String): CloudSyncResponse =
         json.decodeFromString(request(url, "/v1/sync", "GET", null, token))
 
-    suspend fun putSync(url: String, token: String, payload: SyncPayload, baseVersion: Int?): CloudPutResult {
-        val body = json.encodeToString(PutSyncBody(payload, baseVersion))
+    suspend fun putSync(
+        url: String,
+        token: String,
+        payload: SyncPayload,
+        baseVersion: Int?,
+        merge: Boolean = false,
+    ): CloudPutResult {
+        val body = json.encodeToString(PutSyncBody(payload, baseVersion, merge))
         return json.decodeFromString(request(url, "/v1/sync", "PUT", body, token))
     }
 

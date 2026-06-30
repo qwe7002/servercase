@@ -79,11 +79,17 @@ export const cloudApi = {
     }),
   getSync: (url: string, token: string) =>
     call<SyncResponse>(url, '/v1/sync', { token }),
-  putSync: (url: string, token: string, payload: SyncPayload, baseVersion?: number) =>
-    call<{ version: number; updatedAt: number }>(url, '/v1/sync', {
+  putSync: (
+    url: string,
+    token: string,
+    payload: SyncPayload,
+    baseVersion?: number,
+    merge = false,
+  ) =>
+    call<SyncResponse>(url, '/v1/sync', {
       method: 'PUT',
       token,
-      body: JSON.stringify({ payload, baseVersion }),
+      body: JSON.stringify({ payload, baseVersion, merge }),
     }),
   listProbes: (url: string, token: string) =>
     call<{ hosts: ProbeHost[] }>(url, '/v1/probes', { token }),
@@ -124,11 +130,10 @@ export async function cloudAuth(email: string, password: string): Promise<CloudU
   const url = useSettings.getState().settings.cloud.url;
   const res = await cloudApi.login(url, email, password);
   useCloud.getState().setSession(res);
-  try {
-    await cloudPull();
-  } catch (e) {
-    if (!(e instanceof CloudError && e.status === 404)) throw e;
-  }
+  useSettings.getState().setCloud({ email: res.user.email });
+  const sync = await cloudApi.putSync(url, res.token, buildSyncPayload(), undefined, true);
+  applySyncPayload(sync.payload);
+  useCloud.getState().setSync({ syncVersion: sync.version, syncedAt: sync.updatedAt });
   useSettings.getState().setCloud({ email: res.user.email });
   return res.user;
 }

@@ -84,18 +84,7 @@ export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Pr
           </span>
           ServerCase
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            title="Manage groups"
-            onClick={onManageGroups}
-          >
-            <Folders />
-          </Button>
-          <Button size="icon" variant="ghost" title="Settings" onClick={onOpenSettings}>
-            <SettingsIcon />
-          </Button>
+        <div className="flex items-center">
           <Button size="icon" variant="outline" title="Add server" onClick={onAdd}>
             <Plus />
           </Button>
@@ -155,6 +144,27 @@ export function ServerList({ onAdd, onEdit, onOpenSettings, onManageGroups }: Pr
           : filtered.map((srv) => (
               <ServerRow key={srv.id} srv={srv} onEdit={onEdit} />
             ))}
+      </div>
+
+      <div className="space-y-1 border-t p-2">
+        <Button
+          className="w-full justify-start"
+          variant="ghost"
+          title="Manage groups"
+          onClick={onManageGroups}
+        >
+          <Folders className="size-4" />
+          Folders
+        </Button>
+        <Button
+          className="w-full justify-start"
+          variant="ghost"
+          title="Settings"
+          onClick={onOpenSettings}
+        >
+          <SettingsIcon className="size-4" />
+          Settings
+        </Button>
       </div>
     </aside>
   );

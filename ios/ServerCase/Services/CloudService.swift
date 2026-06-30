@@ -177,13 +177,13 @@ struct CloudService {
         )
     }
 
-    func putSync(url: String, token: String, payload: SyncPayload, baseVersion: Int?) async throws -> CloudSyncResult {
+    func putSync(url: String, token: String, payload: SyncPayload, baseVersion: Int?, merge: Bool = false) async throws -> CloudSyncResult {
         try await send(
             path: "/sync",
             baseURL: url,
             method: "PUT",
             token: token,
-            body: PutSyncRequest(baseVersion: baseVersion, payload: payload)
+            body: PutSyncRequest(baseVersion: baseVersion, merge: merge, payload: payload)
         )
     }
 
@@ -353,6 +353,7 @@ private struct DeviceRequest: Encodable {
 
 private struct PutSyncRequest: Encodable {
     var baseVersion: Int?
+    var merge: Bool = false
     var payload: SyncPayload
 }
 

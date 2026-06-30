@@ -249,11 +249,15 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
     // --- Cloud sync -------------------------------------------------------
 
     /** Bitwarden API key is a secret; never upload it. */
-    private fun buildPayload(): SyncPayload {
+    private fun buildPayload(cloudEmail: String? = null): SyncPayload {
         val s = _ui.value.settings
+        val cloudSettings = if (cloudEmail == null) s.cloud else s.cloud.copy(email = cloudEmail)
         return SyncPayload(
             servers = _ui.value.servers.map { it.strippingSecrets() },
-            settings = s.copy(bitwarden = s.bitwarden.copy(clientId = "", clientSecret = "")),
+            settings = s.copy(
+                bitwarden = s.bitwarden.copy(clientId = "", clientSecret = ""),
+                cloud = cloudSettings,
+            ),
         )
     }
 
@@ -263,23 +267,22 @@ class ServersViewModel(app: Application) : AndroidViewModel(app) {
             val res = if (register) cloud.register(url, email, password) else cloud.login(url, email, password)
             val session = CloudSession(token = res.token, expiresAt = res.expiresAt, user = res.user)
             cloudRepo.save(session)
-            var pulledSettings: GlobalSettings? = null
-            runCatching { cloud.getSync(url, session.token) }
-                .onSuccess { sync ->
-                    applyingRemote = true
-                    try {
-                        repo.save(sync.payload.servers)
-                        settingsRepo.save(sync.payload.settings)
-                    } finally {
-                        applyingRemote = false
-                    }
-                    cloudRepo.save(session.copy(syncVersion = sync.version, syncedAt = sync.updatedAt))
-                    pulledSettings = sync.payload.settings
-                }
-                .onFailure {
-                    if (it !is CloudException || it.status != 404) throw it
-                }
-            val s = pulledSettings ?: _ui.value.settings
+            val sync = cloud.putSync(
+                url,
+                session.token,
+                buildPayload(cloudEmail = res.user.email),
+                baseVersion = null,
+                merge = true,
+            )
+            applyingRemote = true
+            try {
+                repo.save(sync.payload.servers)
+                settingsRepo.save(sync.payload.settings)
+            } finally {
+                applyingRemote = false
+            }
+            cloudRepo.save(session.copy(syncVersion = sync.version, syncedAt = sync.updatedAt))
+            val s = sync.payload.settings
             applyingRemote = true
             try {
                 settingsRepo.save(s.copy(cloud = s.cloud.copy(email = res.user.email)))
