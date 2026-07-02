@@ -8,6 +8,7 @@ import { formatKb, formatUptime, percent } from '../format';
 import { statusFromProbe } from '../lib/probeStatus';
 import { Gauge, UsageBar } from './StatusCard';
 import { TerminalTabs } from './TerminalTabs';
+import { SerialConsole } from './SerialConsole';
 import { Sftp } from './Sftp';
 import { PortForwards } from './PortForwards';
 import { connectServer } from '../lib/connect';
@@ -29,7 +30,7 @@ interface Props {
   server: ServerConfig;
 }
 
-type Tab = 'overview' | 'terminal' | 'files' | 'forwarding';
+type Tab = 'overview' | 'terminal' | 'serial' | 'files' | 'forwarding';
 
 export function Dashboard({ server }: Props) {
   const connState = useServers((s) => s.connState[server.id]) ?? 'disconnected';
@@ -123,6 +124,7 @@ export function Dashboard({ server }: Props) {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="terminal">Terminal</TabsTrigger>
+            <TabsTrigger value="serial">Serial</TabsTrigger>
             <TabsTrigger value="files">Files</TabsTrigger>
             <TabsTrigger value="forwarding">Forwarding</TabsTrigger>
           </TabsList>
@@ -147,6 +149,8 @@ export function Dashboard({ server }: Props) {
               : 'SSH connection is offline. Use Reconnect from the server list menu.'}
           </Placeholder>
         )
+      ) : tab === 'serial' ? (
+        <SerialConsole />
       ) : tab === 'files' ? (
         connected ? (
           <Sftp serverId={server.id} />

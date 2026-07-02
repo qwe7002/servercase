@@ -7,12 +7,16 @@ import {
   type BridgeServerEntry,
   type CommandResult,
   type ConnectionEvent,
+  type BleSerialDeviceInfo,
   type PortForwardInfo,
   type PortForwardRequest,
+  type SerialConnectionEvent,
+  type SerialOpenOptions,
   type ServerConfig,
   type ServerSecrets,
   type ServerStatus,
   type SftpList,
+  type WiredSerialPortInfo,
 } from './shared.js';
 
 /** The typed API surface exposed to the renderer as `window.servercase`. */
@@ -53,6 +57,30 @@ const api = {
     ipcRenderer.send(IpcChannels.shellResize, serverId, shellId, cols, rows),
   closeShell: (serverId: string, shellId: string): void =>
     ipcRenderer.send(IpcChannels.shellClose, serverId, shellId),
+
+  serial: {
+    listPorts: (): Promise<WiredSerialPortInfo[]> =>
+      ipcRenderer.invoke(IpcChannels.serialListPorts),
+    scanBle: (timeoutMs?: number): Promise<BleSerialDeviceInfo[]> =>
+      ipcRenderer.invoke(IpcChannels.serialScanBle, timeoutMs),
+    open: (sessionId: string, options: SerialOpenOptions): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.serialOpen, sessionId, options),
+    write: (sessionId: string, data: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.serialWrite, sessionId, data),
+    close: (sessionId: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.serialClose, sessionId),
+    onData: (cb: (sessionId: string, data: string) => void): (() => void) => {
+      const handler = (_e: unknown, sessionId: string, data: string) =>
+        cb(sessionId, data);
+      ipcRenderer.on(IpcChannels.serialData, handler);
+      return () => ipcRenderer.off(IpcChannels.serialData, handler);
+    },
+    onEvent: (cb: (event: SerialConnectionEvent) => void): (() => void) => {
+      const handler = (_e: unknown, payload: SerialConnectionEvent) => cb(payload);
+      ipcRenderer.on(IpcChannels.serialEvent, handler);
+      return () => ipcRenderer.off(IpcChannels.serialEvent, handler);
+    },
+  },
 
   // Bitwarden secret vault
   bw: {

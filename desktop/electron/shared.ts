@@ -97,6 +97,63 @@ export interface PortForwardInfo {
   openedAt: number;
 }
 
+// ── Local serial console ────────────────────────────────────────────────────
+
+export type SerialTransport = 'wired' | 'ble';
+
+export interface WiredSerialPortInfo {
+  path: string;
+  manufacturer?: string;
+  serialNumber?: string;
+  pnpId?: string;
+  locationId?: string;
+  productId?: string;
+  vendorId?: string;
+}
+
+export interface BleSerialDeviceInfo {
+  id: string;
+  name: string;
+  address?: string;
+  rssi: number;
+  serviceUuids: string[];
+}
+
+export interface WiredSerialOpenOptions {
+  transport: 'wired';
+  path: string;
+  baudRate: number;
+  dataBits?: 5 | 6 | 7 | 8;
+  stopBits?: 1 | 1.5 | 2;
+  parity?: 'none' | 'even' | 'mark' | 'odd' | 'space';
+}
+
+export interface BleSerialOpenOptions {
+  transport: 'ble';
+  peripheralId: string;
+  /** UART-like GATT service. Defaults to Nordic UART Service. */
+  serviceUuid?: string;
+  /** Characteristic the desktop writes to. Defaults to Nordic UART RX. */
+  writeCharacteristicUuid?: string;
+  /** Characteristic the desktop subscribes to. Defaults to Nordic UART TX. */
+  notifyCharacteristicUuid?: string;
+}
+
+export type SerialOpenOptions = WiredSerialOpenOptions | BleSerialOpenOptions;
+
+export type SerialConnectionState =
+  | 'opening'
+  | 'open'
+  | 'closed'
+  | 'error';
+
+export interface SerialConnectionEvent {
+  sessionId: string;
+  transport: SerialTransport;
+  state: SerialConnectionState;
+  error?: string;
+}
+
 // ── Global settings ─────────────────────────────────────────────────────────
 
 /** A reusable shell command, runnable in any server's terminal. */
@@ -303,8 +360,16 @@ export const IpcChannels = {
   sftpRemove: 'sc:sftp:remove',
   sftpDownload: 'sc:sftp:download',
   sftpUpload: 'sc:sftp:upload',
+  // local serial console
+  serialListPorts: 'sc:serial:listPorts',
+  serialScanBle: 'sc:serial:scanBle',
+  serialOpen: 'sc:serial:open',
+  serialWrite: 'sc:serial:write',
+  serialClose: 'sc:serial:close',
   // main -> renderer push channels
   connectionEvent: 'sc:connectionEvent',
   shellOutput: 'sc:shell:output',
   shellClosed: 'sc:shell:closed',
+  serialData: 'sc:serial:data',
+  serialEvent: 'sc:serial:event',
 } as const;

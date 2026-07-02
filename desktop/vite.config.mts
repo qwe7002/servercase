@@ -17,7 +17,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['ssh2'],
+              external: ['ssh2', 'serialport', '@abandonware/noble'],
             },
           },
         },

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import { SshManager } from './ssh/sshManager.js';
+import { SerialManager } from './serial/serialManager.js';
 import { BitwardenVault } from './bitwarden.js';
 import { Bridge } from './bridge.js';
 import {
@@ -8,6 +9,7 @@ import {
   type BitwardenSettings,
   type BridgeServerEntry,
   type PortForwardRequest,
+  type SerialOpenOptions,
   type ServerConfig,
   type ServerSecrets,
 } from './shared.js';
@@ -27,6 +29,11 @@ const ssh = new SshManager(
 );
 
 const bitwarden = new BitwardenVault();
+
+const serial = new SerialManager(
+  (sessionId, data) => send(IpcChannels.serialData, sessionId, data),
+  (event) => send(IpcChannels.serialEvent, event),
+);
 
 const bridge = new Bridge(ssh, (serverId) =>
   send(IpcChannels.bridgeConnectRequest, serverId),
@@ -101,6 +108,23 @@ function registerIpc(): void {
   );
   ipcMain.on(IpcChannels.shellClose, (_e, serverId: string, shellId: string) =>
     ssh.closeShell(serverId, shellId),
+  );
+
+  // ── Local serial console (USB serial + BLE GATT UART) ────────────────────
+  ipcMain.handle(IpcChannels.serialListPorts, () => serial.listPorts());
+  ipcMain.handle(IpcChannels.serialScanBle, (_e, timeoutMs?: number) =>
+    serial.scanBle(timeoutMs),
+  );
+  ipcMain.handle(
+    IpcChannels.serialOpen,
+    (_e, sessionId: string, options: SerialOpenOptions) =>
+      serial.open(sessionId, options),
+  );
+  ipcMain.handle(IpcChannels.serialWrite, (_e, sessionId: string, data: string) =>
+    serial.write(sessionId, data),
+  );
+  ipcMain.handle(IpcChannels.serialClose, (_e, sessionId: string) =>
+    serial.close(sessionId),
   );
 
   // ── Bitwarden secret vault ────────────────────────────────────────────────
@@ -203,11 +227,13 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   ssh.dispose();
+  void serial.dispose();
   void bridge.dispose();
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', () => {
   ssh.dispose();
+  void serial.dispose();
   void bridge.dispose();
 });
