@@ -15,6 +15,14 @@ export interface ServerConfig {
   groupId?: string;
   /** Cloud probe host id to use for overview status instead of SSH polling. */
   probeHostId?: string;
+  /**
+   * Id of a Bitwarden vault item that supplies this host's login credentials.
+   * When set (and the vault is enabled), the password/private key are read from
+   * that item at connect time instead of being typed in and stored here — so no
+   * host secret lives on the device. Only this reference id is persisted and
+   * synced to the cloud.
+   */
+  bitwardenItemId?: string;
   /** Present when authType === 'password'. */
   password?: string;
   /** PEM private key text, present when authType === 'key'. */
@@ -183,7 +191,12 @@ export interface BitwardenSettings {
   email: string;
   /** Personal API key client_id ("user.<guid>"), from the Bitwarden web vault. */
   clientId: string;
-  /** Personal API key client_secret. Sensitive; redacted from the sync file. */
+  /**
+   * Personal API key client_secret. Synced to the cloud alongside the rest of
+   * the Bitwarden config so a new device can unlock the vault with only the
+   * master password (which is never synced). This is a deliberate convenience
+   * trade-off: the API secret then lives in the cloud config store.
+   */
   clientSecret: string;
   /** Name prefix for vault items owned by ServerCase. */
   itemPrefix: string;
@@ -275,6 +288,16 @@ export interface ServerSecrets {
   passphrase?: string;
 }
 
+/** A selectable login item in the user's Bitwarden vault. */
+export interface BitwardenItem {
+  /** Cipher GUID, stored on a server as {@link ServerConfig.bitwardenItemId}. */
+  id: string;
+  /** Decrypted item name shown in the picker. */
+  name: string;
+  /** Decrypted login username, if the item has one. */
+  username?: string;
+}
+
 export type BitwardenLockState = 'unauthenticated' | 'locked' | 'unlocked';
 
 /** Runtime status of the Bitwarden CLI integration. */
@@ -289,9 +312,11 @@ export interface BitwardenStatus {
 }
 
 /**
- * Secret-free configuration snapshot synced to the cloud (ServerCase Worker).
- * Secrets are deliberately excluded: with Bitwarden they sync through the
- * vault, and without Bitwarden they are intentionally not portable.
+ * Configuration snapshot synced to the cloud (ServerCase Worker). Host secrets
+ * (passwords, private keys) are excluded — with Bitwarden they sync through the
+ * vault, and without Bitwarden they are intentionally not portable. The
+ * Bitwarden API key *is* included so the vault self-configures on a new device
+ * (see {@link BitwardenSettings.clientSecret}).
  */
 export interface SyncPayload {
   version: 1;
@@ -344,7 +369,9 @@ export const IpcChannels = {
   bwTest: 'sc:bw:test',
   bwSet: 'sc:bw:set',
   bwGet: 'sc:bw:get',
+  bwGetById: 'sc:bw:getById',
   bwList: 'sc:bw:list',
+  bwItems: 'sc:bw:items',
   bwDelete: 'sc:bw:delete',
   // control bridge (for the MCP server)
   bridgeInfo: 'sc:bridge:info',

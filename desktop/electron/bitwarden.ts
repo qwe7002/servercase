@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2';
 import type {
+  BitwardenItem,
   BitwardenSettings,
   BitwardenStatus,
   ServerSecrets,
@@ -150,6 +151,35 @@ export class BitwardenVault {
   async getSecrets(serverId: string): Promise<ServerSecrets | null> {
     const cipher = await this.findCipher(serverId);
     return cipher ? this.decodeSecrets(cipher) : null;
+  }
+
+  /** Resolves the credentials of any vault item by its cipher id. */
+  async getSecretsById(id: string): Promise<ServerSecrets | null> {
+    const cipher = (await this.fetchCiphers()).find((c) => c.id === id);
+    return cipher ? this.decodeSecrets(cipher) : null;
+  }
+
+  /**
+   * Lists the user's login items so a host can be pointed at an existing vault
+   * entry instead of typing its password/key. Not limited to ServerCase's own
+   * items — any login in the vault is selectable.
+   */
+  async listItems(): Promise<BitwardenItem[]> {
+    const ciphers = await this.fetchCiphers();
+    const out: BitwardenItem[] = [];
+    for (const cipher of ciphers) {
+      if (cipher.type !== 1) continue; // login items only
+      const keys = this.cipherKeys(cipher);
+      const name = decryptField(cipher.name, keys.enc, keys.mac);
+      if (!name) continue;
+      out.push({
+        id: cipher.id,
+        name,
+        username:
+          decryptField(cipher.login?.username, keys.enc, keys.mac) ?? undefined,
+      });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async listSecrets(): Promise<Record<string, ServerSecrets>> {
@@ -385,6 +415,8 @@ interface CipherLogin {
 
 interface Cipher {
   id: string;
+  /** Bitwarden cipher type: 1 = login, 2 = note, 3 = card, 4 = identity. */
+  type: number;
   name: string | null;
   notes: string | null;
   key: string | null;
@@ -407,6 +439,7 @@ function normalizeCipher(raw: RawCipher): Cipher {
   const login = (pick(raw, 'Login', 'login') as RawCipher | undefined) ?? undefined;
   return {
     id: String(pick(raw, 'Id', 'id')),
+    type: Number(pick(raw, 'Type', 'type') ?? 1),
     name: (pick(raw, 'Name', 'name') as string | null) ?? null,
     notes: (pick(raw, 'Notes', 'notes') as string | null) ?? null,
     key: (pick(raw, 'Key', 'key') as string | null) ?? null,

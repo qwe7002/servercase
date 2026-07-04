@@ -157,7 +157,11 @@ function registerIpc(): void {
   ipcMain.handle(IpcChannels.bwGet, (_e, serverId: string) =>
     bitwarden.getSecrets(serverId),
   );
+  ipcMain.handle(IpcChannels.bwGetById, (_e, id: string) =>
+    bitwarden.getSecretsById(id),
+  );
   ipcMain.handle(IpcChannels.bwList, () => bitwarden.listSecrets());
+  ipcMain.handle(IpcChannels.bwItems, () => bitwarden.listItems());
   ipcMain.handle(IpcChannels.bwDelete, (_e, serverId: string) =>
     bitwarden.deleteSecrets(serverId),
   );

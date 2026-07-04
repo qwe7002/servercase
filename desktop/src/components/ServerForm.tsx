@@ -1,5 +1,9 @@
-import { useState } from 'react';
-import type { AuthType, ServerConfig } from '../../electron/shared';
+import { useEffect, useState } from 'react';
+import type {
+  AuthType,
+  BitwardenItem,
+  ServerConfig,
+} from '../../electron/shared';
 import { useServers } from '../store/servers';
 import { useProbes } from '../store/probes';
 import { useSettings } from '../store/settings';
@@ -27,6 +31,7 @@ export function ServerForm({ existing, onDone }: Props) {
   const addServer = useServers((s) => s.addServer);
   const updateServer = useServers((s) => s.updateServer);
   const groups = useSettings((s) => s.settings.groups);
+  const vaultEnabled = useSettings((s) => s.settings.bitwarden.enabled);
   const probeHosts = useProbes((s) => s.hosts);
 
   const [name, setName] = useState(existing?.name ?? '');
@@ -41,6 +46,42 @@ export function ServerForm({ existing, onDone }: Props) {
   const [password, setPassword] = useState(existing?.password ?? '');
   const [privateKey, setPrivateKey] = useState(existing?.privateKey ?? '');
   const [passphrase, setPassphrase] = useState(existing?.passphrase ?? '');
+  const [bitwardenItemId, setBitwardenItemId] = useState(
+    existing?.bitwardenItemId ?? '',
+  );
+
+  // Vault items available to pick as the credential source. Only loaded when
+  // the vault is enabled and unlocked; empty otherwise (manual entry).
+  const [vaultItems, setVaultItems] = useState<BitwardenItem[] | null>(null);
+
+  useEffect(() => {
+    const api = window.servercase;
+    if (!vaultEnabled || !api) {
+      setVaultItems(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await api.bw.status();
+        if (status.state !== 'unlocked') {
+          if (!cancelled) setVaultItems(null);
+          return;
+        }
+        const items = await api.bw.items();
+        if (!cancelled) setVaultItems(items);
+      } catch {
+        if (!cancelled) setVaultItems(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultEnabled]);
+
+  // Whether the host's login comes from a hand-picked vault item. Only honored
+  // while the vault is enabled; otherwise fall back to manual entry.
+  const fromVault = vaultEnabled && Boolean(bitwardenItemId);
 
   const canSave = name.trim() && host.trim() && username.trim();
 
@@ -55,9 +96,12 @@ export function ServerForm({ existing, onDone }: Props) {
       groupId: groupId || undefined,
       probeHostId: probeHostId || undefined,
       authType,
-      password: authType === 'password' ? password : undefined,
-      privateKey: authType === 'key' ? privateKey : undefined,
-      passphrase: authType === 'key' ? passphrase || undefined : undefined,
+      // When sourced from the vault, no secret is stored on the device.
+      bitwardenItemId: vaultEnabled ? bitwardenItemId || undefined : undefined,
+      password: fromVault || authType !== 'password' ? undefined : password,
+      privateKey: fromVault || authType !== 'key' ? undefined : privateKey,
+      passphrase:
+        fromVault || authType !== 'key' ? undefined : passphrase || undefined,
     };
     if (existing) updateServer({ ...base, id: existing.id });
     else addServer(base);
@@ -154,6 +198,29 @@ export function ServerForm({ existing, onDone }: Props) {
               </select>
             </div>
 
+            {vaultItems && (
+              <div className="grid gap-2">
+                <Label htmlFor="server-bw-item">Credentials from Bitwarden</Label>
+                <select
+                  id="server-bw-item"
+                  value={bitwardenItemId}
+                  onChange={(e) => setBitwardenItemId(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <option value="">Enter manually</option>
+                  {vaultItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.username ? `${item.name} (${item.username})` : item.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Pick a vault item to source this host's login. Its password and
+                  key stay in Bitwarden — only the reference is stored and synced.
+                </p>
+              </div>
+            )}
+
             <div className="grid gap-2">
               <Label>Authentication</Label>
               <Tabs
@@ -167,7 +234,11 @@ export function ServerForm({ existing, onDone }: Props) {
               </Tabs>
             </div>
 
-            {authType === 'password' ? (
+            {fromVault ? (
+              <p className="text-sm text-muted-foreground">
+                Login is read from the selected Bitwarden item at connect time.
+              </p>
+            ) : authType === 'password' ? (
               <div className="grid gap-2">
                 <Label htmlFor="server-password">Password</Label>
                 <Input

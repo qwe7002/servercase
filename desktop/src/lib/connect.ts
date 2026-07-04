@@ -16,7 +16,11 @@ export async function connectServer(server: ServerConfig): Promise<void> {
     let cfg = server;
     const vaultEnabled = useSettings.getState().settings.bitwarden.enabled;
     if (vaultEnabled && !server.password && !server.privateKey) {
-      const secrets = await api.bw.get(server.id);
+      // Prefer a hand-picked vault item; fall back to ServerCase's own item
+      // keyed by server id.
+      const secrets = server.bitwardenItemId
+        ? await api.bw.getById(server.bitwardenItemId)
+        : await api.bw.get(server.id);
       if (secrets) cfg = { ...server, ...secrets };
     }
     await api.connect(cfg);

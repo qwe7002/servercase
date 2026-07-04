@@ -35,8 +35,13 @@ function stripSecrets(cfg: ServerConfig): ServerConfig {
   };
 }
 
-/** Mirrors a server's secrets into the Bitwarden vault (best effort). */
+/**
+ * Mirrors a server's secrets into ServerCase's own Bitwarden item (best effort).
+ * Skipped when the server points at a hand-picked vault item, which is
+ * user-owned and read-only to us — we never overwrite or create it.
+ */
 function pushSecret(cfg: ServerConfig): void {
+  if (cfg.bitwardenItemId) return;
   void window.servercase?.bw.set(cfg.id, secretsOf(cfg)).catch(() => undefined);
 }
 
@@ -94,11 +99,13 @@ export const useServers = create<ServersState>()(
         if (vaultEnabled()) pushSecret(cfg);
       },
       removeServer: (id) => {
+        const removed = get().servers.find((x) => x.id === id);
         set((s) => ({
           servers: s.servers.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
         }));
-        if (vaultEnabled())
+        // Only clean up ServerCase's own item; never delete a hand-picked one.
+        if (vaultEnabled() && !removed?.bitwardenItemId)
           void window.servercase?.bw.delete(id).catch(() => undefined);
       },
       select: (id) => set({ selectedId: id }),
@@ -133,6 +140,7 @@ export const useServers = create<ServersState>()(
         const api = window.servercase;
         if (!api) return;
         for (const sv of get().servers) {
+          if (sv.bitwardenItemId) continue; // hand-picked items are read-only
           await api.bw.set(sv.id, secretsOf(sv));
         }
       },

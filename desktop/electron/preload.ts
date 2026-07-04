@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IpcChannels,
+  type BitwardenItem,
   type BitwardenSettings,
   type BitwardenStatus,
   type BridgeInfo,
@@ -97,8 +98,12 @@ const api = {
       ipcRenderer.invoke(IpcChannels.bwSet, serverId, secrets),
     get: (serverId: string): Promise<ServerSecrets | null> =>
       ipcRenderer.invoke(IpcChannels.bwGet, serverId),
+    getById: (id: string): Promise<ServerSecrets | null> =>
+      ipcRenderer.invoke(IpcChannels.bwGetById, id),
     list: (): Promise<Record<string, ServerSecrets>> =>
       ipcRenderer.invoke(IpcChannels.bwList),
+    items: (): Promise<BitwardenItem[]> =>
+      ipcRenderer.invoke(IpcChannels.bwItems),
     delete: (serverId: string): Promise<void> =>
       ipcRenderer.invoke(IpcChannels.bwDelete, serverId),
   },

@@ -13,9 +13,11 @@ function withoutSecrets(cfg: ServerConfig): ServerConfig {
 }
 
 /**
- * Builds the current secret-free snapshot of servers + settings. Shared by the
- * file export and the cloud push so both serialize identically. The Bitwarden
- * API key is a secret and is redacted here.
+ * Builds the current snapshot of servers + settings. Shared by the file export
+ * and the cloud push so both serialize identically. Host secrets (passwords,
+ * private keys) are stripped, but the Bitwarden API key (clientId +
+ * clientSecret) is kept so the vault self-configures on another device — only
+ * the master password, which is never synced, is then needed to unlock it.
  */
 export function buildSyncPayload(): SyncPayload {
   const settings = useSettings.getState().settings;
@@ -23,10 +25,7 @@ export function buildSyncPayload(): SyncPayload {
     version: 1,
     exportedAt: Date.now(),
     servers: useServers.getState().servers.map(withoutSecrets),
-    settings: {
-      ...settings,
-      bitwarden: { ...settings.bitwarden, clientId: '', clientSecret: '' },
-    },
+    settings,
   };
 }
 
