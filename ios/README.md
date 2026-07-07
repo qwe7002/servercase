@@ -17,6 +17,12 @@ over SwiftNIO).
   A loopback SOCKS5 proxy (`SSHProxyServer`) forwards each request over an SSH
   `direct-tcpip` channel; the web view is pointed at it with a SOCKSv5
   `ProxyConfiguration` (iOS 17+), so pages load — and DNS resolves — server-side.
+- **Live Activity** — while an SSH session is up, a Live Activity keeps the
+  connection on the Lock Screen and in the Dynamic Island (server name, host,
+  connection state, CPU / memory / uptime). It starts on connect, refreshes on
+  each 3‑second status poll, and ends on disconnect. Rendered by the
+  `ConnectionWidget` extension; managed by `ConnectionActivityController`. All
+  best-effort — if the user has Live Activities off it is silently skipped.
 - **One-tap probe install** on a server's Overview: creates a cloud probe named
   after the host, installs it over SSH, and links it (mirrors the desktop
   dashboard). Probe hosts can still be managed in Settings.
@@ -46,7 +52,10 @@ Models/
   ServerStatus.swift      Parsed status model
   Settings.swift          GlobalSettings / Snippet / Cloud / Bitwarden models
   StatusParser.swift      statusCommand + /proc parsing, CPU/net deltas
+LiveActivity/
+  ConnectionActivityAttributes.swift  ActivityKit payload shared with the widget
 Services/
+  ConnectionActivityController.swift  starts/updates/ends the connection Live Activity
   SSHService.swift        Citadel connection (actor): exec + raw PTY streams + tunnels
   SSHTunnel.swift         direct-tcpip channel ↔ byte-stream bridge (NIOSSH handlers)
   SSHProxyServer.swift    loopback SOCKS5 proxy backing the proxy browser
@@ -69,7 +78,17 @@ Views/
   Components/Indicators.swift  GaugeView + UsageBarView + StatusDot
   Format.swift            byte/rate/uptime formatting + palette
 ServerCaseApp.swift       @main App entry
+
+ConnectionWidget/         Widget extension target (Live Activity UI)
+  ConnectionWidgetBundle.swift   @main WidgetBundle
+  ConnectionLiveActivity.swift   Lock Screen + Dynamic Island layouts
+  Info.plist                     widgetkit-extension point
 ```
+
+The `ConnectionWidget` extension is a second target in `project.yml`; the app
+embeds it and enables `NSSupportsLiveActivities`. The `ActivityAttributes` type
+is compiled into **both** targets (globbed into the app, referenced by path in
+the extension). Re-run `xcodegen generate` after pulling these in.
 
 The file manager is command-based (over the SSH exec channel) rather than
 relying on Citadel's SFTP API, so it needs nothing on the host beyond

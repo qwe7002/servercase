@@ -31,11 +31,13 @@ targets:
       - package: SwiftTerm
       - package: Firebase
         product: FirebaseMessaging
+      - target: ConnectionWidget
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.servercase.app
         CODE_SIGN_ENTITLEMENTS: ServerCase/ServerCase.entitlements
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSSupportsLiveActivities: YES
         INFOPLIST_KEY_CFBundleDisplayName: ServerCase
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -47,3 +49,22 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
+
+  ConnectionWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ConnectionWidget
+      - path: ServerCase/LiveActivity/ConnectionActivityAttributes.swift
+        group: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.servercase.app.ConnectionWidget
+        INFOPLIST_FILE: ConnectionWidget/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_KEY_CFBundleDisplayName: ServerCase Connection
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES

@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>ServerCase</string>
+    <string>ServerCase Connection</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -20,30 +20,10 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
-    <key>NSAppTransportSecurity</key>
+    <key>NSExtension</key>
     <dict>
-        <key>NSAllowsArbitraryLoadsInWebContent</key>
-        <true/>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.widgetkit-extension</string>
     </dict>
-    <key>NSSupportsLiveActivities</key>
-    <true/>
-    <key>UIApplicationSceneManifest</key>
-    <dict>
-        <key>UIApplicationSupportsMultipleScenes</key>
-        <false/>
-    </dict>
-    <key>UILaunchScreen</key>
-    <dict/>
-    <key>UISupportedInterfaceOrientations</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-    </array>
-    <key>UISupportedInterfaceOrientations~ipad</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-        <string>UIInterfaceOrientationPortraitUpsideDown</string>
-        <string>UIInterfaceOrientationLandscapeLeft</string>
-        <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>
 </dict>
 </plist>

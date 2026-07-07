@@ -108,6 +108,7 @@ final class AppModel: ObservableObject {
                     return
                 }
                 connState[server.id] = .connected
+                ConnectionActivityController.shared.start(server: server, status: status[server.id])
             } catch {
                 guard connectionTokens[server.id] == token else { return }
                 connState[server.id] = .error(error.localizedDescription)
@@ -124,6 +125,7 @@ final class AppModel: ObservableObject {
         services[id] = nil
         collectors[id] = nil
         connState[id] = .disconnected
+        ConnectionActivityController.shared.end(serverId: id)
     }
 
     func service(_ id: String) -> SSHService? { services[id] }
@@ -146,6 +148,7 @@ final class AppModel: ObservableObject {
         do {
             try await service.connect()
             connState[server.id] = .connected
+            ConnectionActivityController.shared.start(server: server, status: status[server.id])
             return service
         } catch {
             services[server.id] = nil
@@ -182,6 +185,7 @@ final class AppModel: ObservableObject {
         do {
             let raw = try await service.run(StatusParser.statusCommand)
             status[id] = StatusParser.parse(raw, state: collector)
+            ConnectionActivityController.shared.update(serverId: id, state: state(id), status: status[id])
         } catch {
             // Transient; surfaced via connection state if the socket drops.
         }
