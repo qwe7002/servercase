@@ -51,6 +51,7 @@ actor BitwardenVault {
     func configure(_ settings: BitwardenSettings) {
         if settings.serverUrl != self.settings.serverUrl ||
             settings.email != self.settings.email ||
+            settings.authMode != self.settings.authMode ||
             settings.clientId != self.settings.clientId {
             lock()
         }
@@ -58,14 +59,25 @@ actor BitwardenVault {
     }
 
     private var base: String {
-        settings.serverUrl.trimmingCharacters(in: .whitespaces)
+        let trimmed = settings.serverUrl.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        guard !trimmed.isEmpty else { return "" }
+        if trimmed.range(of: "http://", options: [.anchored, .caseInsensitive]) != nil ||
+            trimmed.range(of: "https://", options: [.anchored, .caseInsensitive]) != nil {
+            return trimmed
+        }
+        return "https://" + trimmed
     }
     private var identityUrl: String { base.isEmpty ? "https://identity.bitwarden.com" : base + "/identity" }
     private var apiUrl: String { base.isEmpty ? "https://api.bitwarden.com" : base + "/api" }
 
     private var configured: Bool {
-        !settings.email.isEmpty && !settings.clientId.isEmpty && !settings.clientSecret.isEmpty
+        switch settings.authMode {
+        case .apiKey:
+            return !settings.email.isEmpty && !settings.clientId.isEmpty && !settings.clientSecret.isEmpty
+        case .password:
+            return !settings.email.isEmpty
+        }
     }
     private var unlocked: Bool {
         userEncKey != nil && accessToken != nil && Date() < tokenExpiresAt
@@ -80,15 +92,25 @@ actor BitwardenVault {
 
     func unlock(_ masterPassword: String) async throws -> BitwardenStatus {
         guard configured else { throw BitwardenError.notConfigured }
-        let token = try await requestToken()
+
+        let token: TokenResult
         let kdf: KdfInfo
-        if let tokenKdf = token.kdf {
-            kdf = tokenKdf
-        } else {
+        switch settings.authMode {
+        case .apiKey:
+            token = try await requestApiKeyToken()
+            if let tokenKdf = token.kdf {
+                kdf = tokenKdf
+            } else {
+                kdf = await prelogin()
+            }
+        case .password:
             kdf = await prelogin()
+            let masterKey = try await deriveMasterKey(masterPassword, kdf: kdf)
+            let passwordHash = masterPasswordHash(masterKey: masterKey, masterPassword: masterPassword)
+            token = try await requestPasswordToken(passwordHash: passwordHash)
         }
 
-        let masterKey = try await deriveMasterKey(masterPassword, kdf: kdf)
+        let masterKey = try await deriveMasterKey(masterPassword, kdf: token.kdf ?? kdf)
         let stretchedEnc = hkdfExpand(masterKey, info: "enc", length: 32)
         let stretchedMac = hkdfExpand(masterKey, info: "mac", length: 32)
         let userKey = try decryptEncString(token.key, encKey: stretchedEnc, macKey: stretchedMac)
@@ -114,66 +136,86 @@ actor BitwardenVault {
     /// probe, fetch + decrypt it back, verify, then delete it.
     func test() async throws -> String {
         try assertUnlocked()
-        let id = "__selftest__"
+        let itemName = "__selftest__"
         let probe = ServerSecrets(username: "servercase", password: "probe-" + UUID().uuidString)
-        try await setSecrets(id, probe)
+        try await setSecrets(itemName, probe)
         do {
-            let read = try await getSecrets(id)
+            let read = try await getSecrets(itemName)
             guard let read, read.username == probe.username, read.password == probe.password else {
-                try? await deleteSecrets(id)
+                try? await deleteSecrets(itemName)
                 throw BitwardenError.crypto("round-trip mismatch — decrypted value did not match")
             }
-            try? await deleteSecrets(id)
-            return "Vault OK — wrote, read back and verified \(settings.itemPrefix)\(id)."
+            try? await deleteSecrets(itemName)
+            return "Vault OK — wrote, read back and verified \(folderName)/\(itemName)."
         } catch {
-            try? await deleteSecrets(id)
+            try? await deleteSecrets(itemName)
             throw error
         }
     }
 
-    func getSecrets(_ serverId: String) async throws -> ServerSecrets? {
-        guard let cipher = try await findCipher(serverId) else { return nil }
-        return decodeSecrets(cipher)
+    func getSecrets(_ itemName: String, aliases: [String] = []) async throws -> ServerSecrets? {
+        let snapshot = try await fetchSync()
+        guard let cipher = try findCipher(itemName, aliases: aliases, in: snapshot.ciphers) else { return nil }
+        return resolveSecrets(cipher, in: snapshot.ciphers)
     }
 
     func listSecrets() async throws -> [String: ServerSecrets] {
-        let ciphers = try await fetchCiphers()
+        let snapshot = try await fetchSync()
+        let folderId = serverCaseFolderId(in: snapshot.folders)
         var out: [String: ServerSecrets] = [:]
-        for cipher in ciphers {
-            guard let (enc, mac) = try? cipherKeys(cipher) else { continue }
-            if let name = decryptWith(cipher.name, enc, mac), name.hasPrefix(settings.itemPrefix) {
-                out[String(name.dropFirst(settings.itemPrefix.count))] = decodeSecrets(cipher)
+        for cipher in snapshot.ciphers {
+            guard cipher.type == 1,
+                  let (enc, mac) = try? cipherKeys(cipher),
+                  let name = decryptWith(cipher.name, enc, mac) else { continue }
+            if let folderId, cipher.folderId == folderId {
+                out[name] = resolveSecrets(cipher, in: snapshot.ciphers)
+            } else if name.hasPrefix(legacyItemPrefix) {
+                out[String(name.dropFirst(legacyItemPrefix.count))] = resolveSecrets(cipher, in: snapshot.ciphers)
             }
         }
         return out
     }
 
-    func setSecrets(_ serverId: String, _ secrets: ServerSecrets) async throws {
+    func setSecrets(_ itemName: String, _ secrets: ServerSecrets, aliases: [String] = []) async throws {
         try assertUnlocked()
-        let notes = String(data: try JSONEncoder().encode(secrets), encoding: .utf8) ?? "{}"
+        let folderId = try await ensureServerCaseFolderId()
+        var normalizedSecrets = secrets
+        if let privateKey = secrets.privateKey, !privateKey.isEmpty {
+            let keyItemName = secrets.sshKeyItemName?.isEmpty == false
+                ? secrets.sshKeyItemName!
+                : normalizedItemName(itemName) + " SSH Key"
+            try await setSSHKeyItem(keyItemName, privateKey: privateKey)
+            normalizedSecrets.sshKeyItemName = keyItemName
+            normalizedSecrets.password = secrets.passphrase
+            normalizedSecrets.privateKey = nil
+            normalizedSecrets.passphrase = nil
+        }
+
         var login: [String: Any] = ["uris": NSNull(), "totp": NSNull(),
                                     "username": NSNull(), "password": NSNull()]
-        if let u = secrets.username { login["username"] = try encryptField(u) }
-        if let p = secrets.password { login["password"] = try encryptField(p) }
+        if let u = normalizedSecrets.username { login["username"] = try encryptField(u) }
+        if let p = normalizedSecrets.password { login["password"] = try encryptField(p) }
+        let fields = try encryptedFields(for: normalizedSecrets)
         let body: [String: Any] = [
             "type": 1,
-            "name": try encryptField(settings.itemPrefix + serverId),
-            "notes": try encryptField(notes),
+            "name": try encryptField(normalizedItemName(itemName)),
+            "notes": NSNull(),
             "favorite": false,
-            "folderId": NSNull(),
+            "folderId": folderId,
             "organizationId": NSNull(),
             "login": login,
+            "fields": fields.isEmpty ? NSNull() : fields,
         ]
         let payload = try JSONSerialization.data(withJSONObject: body)
-        if let existing = try await findCipher(serverId) {
+        if let existing = try await findCipher(itemName, aliases: aliases) {
             _ = try await api("PUT", "/ciphers/\(existing.id)", body: payload)
         } else {
             _ = try await api("POST", "/ciphers", body: payload)
         }
     }
 
-    func deleteSecrets(_ serverId: String) async throws {
-        if let cipher = try await findCipher(serverId) {
+    func deleteSecrets(_ itemName: String, aliases: [String] = []) async throws {
+        if let cipher = try await findCipher(itemName, aliases: aliases) {
             _ = try await api("DELETE", "/ciphers/\(cipher.id)", body: nil)
         }
     }
@@ -184,7 +226,7 @@ actor BitwardenVault {
         let email = settings.email.trimmingCharacters(in: .whitespaces).lowercased()
         switch kdf.type {
         case 0:
-            return pbkdf2(password, salt: email, iterations: kdf.iterations, keyLength: 32)
+            return pbkdf2(Data(password.utf8), salt: Data(email.utf8), iterations: kdf.iterations, keyLength: 32)
         case 1:
             // Bitwarden Argon2id: salt = SHA-256(email), memory in MiB -> KiB.
             let salt = Data(SHA256.hash(data: Data(email.utf8)))
@@ -222,14 +264,58 @@ actor BitwardenVault {
         return (try encKey(), try macKey())
     }
 
+    private func resolveSecrets(_ cipher: Cipher, in ciphers: [Cipher]) -> ServerSecrets {
+        var secrets = decodeSecrets(cipher)
+        if let keyItemName = secrets.sshKeyItemName,
+           let keyCipher = findCipherByExactName(keyItemName, in: ciphers),
+           let privateKey = decodeSSHPrivateKey(keyCipher) {
+            secrets.privateKey = privateKey
+            secrets.passphrase = secrets.password
+            secrets.password = nil
+        }
+        return secrets
+    }
+
     private func decodeSecrets(_ cipher: Cipher) -> ServerSecrets {
         guard let (enc, mac) = try? cipherKeys(cipher) else { return ServerSecrets() }
         if let notes = decryptWith(cipher.notes, enc, mac), let data = notes.data(using: .utf8),
            let secrets = try? JSONDecoder().decode(ServerSecrets.self, from: data) {
             return secrets
         }
+
+        var sshKeyItemName: String?
+        for field in cipher.fields {
+            guard let name = decryptWith(field.name, enc, mac) else { continue }
+            if name == "servercase.sshKeyItemName" {
+                sshKeyItemName = decryptWith(field.value, enc, mac)
+            }
+        }
+
         return ServerSecrets(username: decryptWith(cipher.username, enc, mac),
-                             password: decryptWith(cipher.password, enc, mac))
+                             password: decryptWith(cipher.password, enc, mac),
+                             sshKeyItemName: sshKeyItemName)
+    }
+
+    private func decodeSSHPrivateKey(_ cipher: Cipher) -> String? {
+        guard let (enc, mac) = try? cipherKeys(cipher) else { return nil }
+        return decryptWith(cipher.sshPrivateKey, enc, mac)
+    }
+
+    private func encryptedFields(for secrets: ServerSecrets) throws -> [[String: Any]] {
+        var fields: [[String: Any]] = []
+        if let keyItemName = secrets.sshKeyItemName, !keyItemName.isEmpty {
+            fields.append(try encryptedHiddenField(name: "servercase.sshKeyItemName", value: keyItemName))
+        }
+        return fields
+    }
+
+    private func encryptedHiddenField(name: String, value: String) throws -> [String: Any] {
+        [
+            "name": try encryptField(name),
+            "value": try encryptField(value),
+            "type": 1,
+            "linkedId": NSNull(),
+        ]
     }
 
     private func encKey() throws -> Data {
@@ -265,8 +351,8 @@ actor BitwardenVault {
         )
     }
 
-    private func requestToken() async throws -> TokenResult {
-        let form = [
+    private func requestApiKeyToken() async throws -> TokenResult {
+        try await requestToken(form: [
             "grant_type": "client_credentials",
             "client_id": settings.clientId,
             "client_secret": settings.clientSecret,
@@ -274,7 +360,24 @@ actor BitwardenVault {
             "deviceType": "1", // iOS
             "deviceIdentifier": deviceId,
             "deviceName": "ServerCase",
-        ].map { "\($0.key)=\(urlEncode($0.value))" }.joined(separator: "&")
+        ])
+    }
+
+    private func requestPasswordToken(passwordHash: String) async throws -> TokenResult {
+        try await requestToken(form: [
+            "grant_type": "password",
+            "client_id": "mobile",
+            "username": settings.email.trimmingCharacters(in: .whitespaces),
+            "password": passwordHash,
+            "scope": "api offline_access",
+            "deviceType": "1", // iOS
+            "deviceIdentifier": deviceId,
+            "deviceName": "ServerCase",
+        ])
+    }
+
+    private func requestToken(form fields: [String: String]) async throws -> TokenResult {
+        let form = fields.map { "\($0.key)=\(urlEncode($0.value))" }.joined(separator: "&")
 
         var req = URLRequest(url: URL(string: identityUrl + "/connect/token")!)
         req.httpMethod = "POST"
@@ -283,8 +386,11 @@ actor BitwardenVault {
         let (data, response) = try await session.data(for: req)
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            let msg = (obj["error_description"] as? String)
-                ?? ((obj["ErrorModel"] as? [String: Any])?["Message"] as? String)
+            let errorModel = (obj["ErrorModel"] as? [String: Any]) ?? (obj["errorModel"] as? [String: Any])
+            let msg = (obj["error_description"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? ((errorModel?["Message"] as? String) ?? (errorModel?["message"] as? String))
+                ?? (obj["message"] as? String)
+                ?? (obj["error"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                 ?? "Bitwarden login failed"
             throw BitwardenError.request(msg)
         }
@@ -297,19 +403,110 @@ actor BitwardenVault {
         return TokenResult(accessToken: token, expiresInSec: expires, key: key, kdf: kdf)
     }
 
-    private func fetchCiphers() async throws -> [Cipher] {
+    private var folderName: String {
+        let trimmed = settings.itemPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.isEmpty ? "ServerCase" : trimmed
+    }
+
+    private var legacyItemPrefix: String { folderName + "/" }
+
+    private func normalizedItemName(_ itemName: String) -> String {
+        let trimmed = itemName.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let withoutFolder = trimmed.hasPrefix(legacyItemPrefix)
+            ? String(trimmed.dropFirst(legacyItemPrefix.count))
+            : trimmed
+        return withoutFolder.isEmpty ? "Server" : withoutFolder
+    }
+
+    private func fetchSync() async throws -> SyncSnapshot {
         try assertUnlocked()
         let data = try await api("GET", "/sync?excludeDomains=true", body: nil)
         let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-        let raw = (pick(obj, "Ciphers", "ciphers") as? [[String: Any]]) ?? []
-        return raw.map(Cipher.init)
+        let rawCiphers = (pick(obj, "Ciphers", "ciphers") as? [[String: Any]]) ?? []
+        let rawFolders = (pick(obj, "Folders", "folders") as? [[String: Any]]) ?? []
+        return SyncSnapshot(
+            ciphers: rawCiphers.map(Cipher.init),
+            folders: rawFolders.map(Folder.init)
+        )
     }
 
-    private func findCipher(_ serverId: String) async throws -> Cipher? {
-        let target = settings.itemPrefix + serverId
-        return try await fetchCiphers().first { cipher in
-            guard let (enc, mac) = try? cipherKeys(cipher) else { return false }
-            return decryptWith(cipher.name, enc, mac) == target
+    private func fetchCiphers() async throws -> [Cipher] {
+        try await fetchSync().ciphers
+    }
+
+    private func serverCaseFolderId(in folders: [Folder]) -> String? {
+        guard let enc = try? encKey(), let mac = try? macKey() else { return nil }
+        return folders.first { folder in
+            decryptWith(folder.name, enc, mac) == folderName
+        }?.id
+    }
+
+    private func ensureServerCaseFolderId() async throws -> String {
+        let snapshot = try await fetchSync()
+        if let id = serverCaseFolderId(in: snapshot.folders) {
+            return id
+        }
+
+        let body = try JSONSerialization.data(withJSONObject: [
+            "name": try encryptField(folderName)
+        ])
+        let data = try await api("POST", "/folders", body: body)
+        let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        guard let id = pick(obj, "Id", "id") as? String else {
+            throw BitwardenError.request("Bitwarden folder create response missing id")
+        }
+        return id
+    }
+
+    private func setSSHKeyItem(_ itemName: String, privateKey: String) async throws {
+        let folderId = try await ensureServerCaseFolderId()
+        let body: [String: Any] = [
+            "type": 5,
+            "name": try encryptField(normalizedItemName(itemName)),
+            "notes": NSNull(),
+            "favorite": false,
+            "folderId": folderId,
+            "organizationId": NSNull(),
+            "sshKey": [
+                "privateKey": try encryptField(privateKey),
+                "publicKey": NSNull(),
+                "keyFingerprint": NSNull(),
+            ],
+        ]
+        let payload = try JSONSerialization.data(withJSONObject: body)
+        if let existing = try await findCipher(itemName) {
+            _ = try await api("PUT", "/ciphers/\(existing.id)", body: payload)
+        } else {
+            _ = try await api("POST", "/ciphers", body: payload)
+        }
+    }
+
+    private func findCipher(_ itemName: String, aliases: [String] = []) async throws -> Cipher? {
+        try findCipher(itemName, aliases: aliases, in: try await fetchCiphers())
+    }
+
+    private func findCipher(_ itemName: String, aliases: [String] = [], in ciphers: [Cipher]) throws -> Cipher? {
+        let primary = normalizedItemName(itemName)
+        let normalizedAliases = aliases.map(normalizedItemName)
+            .filter { !$0.isEmpty && $0 != primary }
+        let exactNames = [primary] + normalizedAliases
+        let legacyNames = exactNames.map { legacyItemPrefix + $0 }
+
+        for expectedName in exactNames + legacyNames {
+            if let match = findCipherByExactName(expectedName, in: ciphers) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func findCipherByExactName(_ itemName: String, in ciphers: [Cipher]) -> Cipher? {
+        ciphers.first { cipher in
+            guard let (enc, mac) = try? cipherKeys(cipher),
+                  let name = decryptWith(cipher.name, enc, mac) else { return false }
+            return name == itemName
         }
     }
 
@@ -353,19 +550,29 @@ actor BitwardenVault {
 
     // MARK: Crypto primitives
 
-    private func pbkdf2(_ password: String, salt: String, iterations: Int, keyLength: Int) -> Data {
+    private func masterPasswordHash(masterKey: Data, masterPassword: String) -> String {
+        pbkdf2(masterKey, salt: Data(masterPassword.utf8), iterations: 1, keyLength: 32)
+            .base64EncodedString()
+    }
+
+    private func pbkdf2(_ password: Data, salt: Data, iterations: Int, keyLength: Int) -> Data {
         var derived = Data(repeating: 0, count: keyLength)
-        let pwd = Array(password.utf8)
-        let saltBytes = Array(salt.utf8)
         _ = derived.withUnsafeMutableBytes { out in
-            CCKeyDerivationPBKDF(
-                CCPBKDFAlgorithm(kCCPBKDF2),
-                password, pwd.count,
-                saltBytes, saltBytes.count,
-                CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
-                UInt32(iterations),
-                out.bindMemory(to: UInt8.self).baseAddress, keyLength
-            )
+            password.withUnsafeBytes { passwordBytes in
+                salt.withUnsafeBytes { saltBytes in
+                    CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        passwordBytes.bindMemory(to: Int8.self).baseAddress,
+                        password.count,
+                        saltBytes.bindMemory(to: UInt8.self).baseAddress,
+                        salt.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                        UInt32(iterations),
+                        out.bindMemory(to: UInt8.self).baseAddress,
+                        keyLength
+                    )
+                }
+            }
         }
         return derived
     }
@@ -452,13 +659,14 @@ private struct TokenResult {
     let kdf: KdfInfo?
 }
 
-private struct Cipher {
+private struct SyncSnapshot {
+    let ciphers: [Cipher]
+    let folders: [Folder]
+}
+
+private struct Folder {
     let id: String
     let name: String?
-    let notes: String?
-    let key: String?
-    let username: String?
-    let password: String?
 
     init(_ raw: [String: Any]) {
         func pick(_ keys: String...) -> Any? {
@@ -467,6 +675,44 @@ private struct Cipher {
         }
         id = (pick("Id", "id") as? String) ?? ""
         name = pick("Name", "name") as? String
+    }
+}
+
+private struct CipherField {
+    let name: String?
+    let value: String?
+
+    init(_ raw: [String: Any]) {
+        func pick(_ keys: String...) -> Any? {
+            for k in keys { if let v = raw[k], !(v is NSNull) { return v } }
+            return nil
+        }
+        name = pick("Name", "name") as? String
+        value = pick("Value", "value") as? String
+    }
+}
+
+private struct Cipher {
+    let id: String
+    let type: Int
+    let name: String?
+    let folderId: String?
+    let notes: String?
+    let key: String?
+    let username: String?
+    let password: String?
+    let sshPrivateKey: String?
+    let fields: [CipherField]
+
+    init(_ raw: [String: Any]) {
+        func pick(_ keys: String...) -> Any? {
+            for k in keys { if let v = raw[k], !(v is NSNull) { return v } }
+            return nil
+        }
+        id = (pick("Id", "id") as? String) ?? ""
+        type = (pick("Type", "type") as? Int) ?? 0
+        name = pick("Name", "name") as? String
+        folderId = pick("FolderId", "folderId") as? String
         notes = pick("Notes", "notes") as? String
         key = pick("Key", "key") as? String
         let login = (pick("Login", "login") as? [String: Any]) ?? [:]
@@ -476,5 +722,13 @@ private struct Cipher {
         }
         username = loginPick("Username", "username")
         password = loginPick("Password", "password")
+        let sshKey = (pick("SshKey", "sshKey", "SSHKey") as? [String: Any]) ?? [:]
+        func sshPick(_ keys: String...) -> String? {
+            for k in keys { if let v = sshKey[k], !(v is NSNull) { return v as? String } }
+            return nil
+        }
+        sshPrivateKey = sshPick("PrivateKey", "privateKey")
+        let rawFields = (pick("Fields", "fields") as? [[String: Any]]) ?? []
+        fields = rawFields.map(CipherField.init)
     }
 }

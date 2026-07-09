@@ -31,7 +31,10 @@ final class AppModel: ObservableObject {
 
     init() {
         let bw = settings.bitwarden
-        Task { await vault.configure(bw) }
+        Task {
+            await vault.configure(bw)
+            await unlockVaultWithStoredPasswordIfAvailable()
+        }
         // Register the FCM token with the worker whenever it's (re)issued.
         NotificationCenter.default.addObserver(forName: .fcmTokenReceived, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.registerPushToken() }
@@ -50,8 +53,8 @@ final class AppModel: ObservableObject {
             servers.append(server)
         }
         saveServers()
-        if vaultEnabled {
-            Task { try? await vault.setSecrets(server.id, server.secrets) }
+        if vaultEnabled, server.secrets.hasCredentialMaterial {
+            Task { try? await vault.setSecrets(server.vaultItemName, server.secrets, aliases: [server.id]) }
         }
     }
 
@@ -59,9 +62,6 @@ final class AppModel: ObservableObject {
         disconnect(server.id)
         servers.removeAll { $0.id == server.id }
         saveServers()
-        if vaultEnabled {
-            Task { try? await vault.deleteSecrets(server.id) }
-        }
     }
 
     func state(_ id: String) -> ConnectionState { connState[id] ?? .disconnected }
@@ -95,7 +95,7 @@ final class AppModel: ObservableObject {
         Task {
             var cfg = server
             if vaultEnabled, server.password == nil, server.privateKey == nil,
-               let secrets = try? await vault.getSecrets(server.id) {
+               let secrets = try? await vault.getSecrets(server.vaultItemName, aliases: [server.id]) {
                 cfg = server.merging(secrets)
             }
             let service = SSHService(config: cfg)
@@ -216,9 +216,30 @@ final class AppModel: ObservableObject {
     }
 
     func unlockVault(_ masterPassword: String) async throws {
+        await vault.configure(settings.bitwarden)
+        bitwardenStatus = await vault.status()
         let status = try await vault.unlock(masterPassword)
+        if status.state == .unlocked, settings.bitwarden.authMode == .password {
+            BitwardenPasswordStore.save(masterPassword, for: settings.bitwarden)
+        }
         bitwardenStatus = status
         if status.state == .unlocked { await loadSecretsFromVault() }
+    }
+
+    func unlockVaultWithStoredPasswordIfAvailable() async {
+        guard settings.bitwarden.enabled,
+              settings.bitwarden.authMode == .password,
+              let password = BitwardenPasswordStore.load(for: settings.bitwarden),
+              !password.isEmpty else {
+            await refreshBitwardenStatus()
+            return
+        }
+
+        do {
+            try await unlockVault(password)
+        } catch {
+            await refreshBitwardenStatus()
+        }
     }
 
     func lockVault() async {
@@ -227,18 +248,23 @@ final class AppModel: ObservableObject {
     }
 
     func loadSecretsFromVault() async {
-        guard let all = try? await vault.listSecrets() else { return }
         for i in servers.indices {
-            if let s = all[servers[i].id] {
+            if let s = try? await vault.getSecrets(servers[i].vaultItemName, aliases: [servers[i].id]) {
                 servers[i] = servers[i].merging(s)
             }
         }
     }
 
-    func pushAllSecretsToVault() async throws {
-        for s in servers { try await vault.setSecrets(s.id, s.secrets) }
-        try? await vault.sync()
-        saveServers()
+    func bitwardenSelectableItems() async throws -> [BitwardenSelectableItem] {
+        await vault.configure(settings.bitwarden)
+        return try await vault.listSecrets()
+            .map { BitwardenSelectableItem(name: $0.key, secrets: $0.value) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func saveBitwardenItem(name: String, secrets: ServerSecrets) async throws {
+        await vault.configure(settings.bitwarden)
+        try await vault.setSecrets(name, secrets)
     }
 
     func testVault() async throws -> String {

@@ -13,6 +13,9 @@ struct ServerConfig: Identifiable, Codable, Equatable, Hashable {
     var host: String
     var port: Int = 22
     var username: String = "root"
+    /// User-facing Bitwarden/Vaultwarden login item name. The item lives inside
+    /// the configured ServerCase folder and can be shared by multiple servers.
+    var bitwardenItemName: String? = nil
     /// Id of the `Group` this server belongs to, if any.
     var groupId: String? = nil
     /// Cloud probe host id to use for overview status instead of SSH polling.

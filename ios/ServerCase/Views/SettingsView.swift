@@ -98,24 +98,32 @@ private struct BitwardenSettingsPage: View {
 
             if draft.bitwarden.enabled {
                 Section("Account") {
-                    TextField("Server URL (blank = bitwarden.com)", text: $draft.bitwarden.serverUrl)
+                    Picker("Sign in mode", selection: $draft.bitwarden.authMode) {
+                        ForEach(BitwardenAuthMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("Server URL or domain (blank = bitwarden.com)", text: $draft.bitwarden.serverUrl)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .keyboardType(.URL)
                     TextField("Account email", text: $draft.bitwarden.email)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .keyboardType(.emailAddress)
-                    TextField("Item name prefix", text: $draft.bitwarden.itemPrefix)
+                    TextField("Folder name", text: $draft.bitwarden.itemPrefix)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
 
-                Section {
-                    TextField("API key client_id", text: $draft.bitwarden.clientId)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    SecureField("API key client_secret", text: $draft.bitwarden.clientSecret)
-                } header: {
-                    Text("API Key")
-                } footer: {
-                    Text("Use a personal API key from the web vault. The master password unlocks locally and is never stored.")
+                if draft.bitwarden.authMode == .apiKey {
+                    Section {
+                        TextField("API key client_id", text: $draft.bitwarden.clientId)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        SecureField("API key client_secret", text: $draft.bitwarden.clientSecret)
+                    } header: {
+                        Text("API Key")
+                    } footer: {
+                        Text("Use a personal API key from the web vault. The master password unlocks locally and is never stored.")
+                    }
                 }
 
                 Section("Vault") {
@@ -131,7 +139,14 @@ private struct BitwardenSettingsPage: View {
         }
         .navigationTitle("Keychain")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.refreshBitwardenStatus() }
+        .task {
+            loadStoredMasterPassword()
+            await model.unlockVaultWithStoredPasswordIfAvailable()
+        }
+        .onChange(of: draft.bitwarden) { _, _ in
+            loadStoredMasterPassword()
+            Task { await model.refreshBitwardenStatus() }
+        }
     }
 
     private var statusRow: some View {
@@ -153,24 +168,42 @@ private struct BitwardenSettingsPage: View {
     }
 
     @ViewBuilder private var vaultActions: some View {
-        if let status = model.bitwardenStatus, status.available {
-            switch status.state {
-            case .unauthenticated:
-                Text("Enter your account email and personal API key.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            case .locked:
-                SecureField("Master password", text: $master)
-                Button("Unlock") { unlock() }.disabled(busy || master.isEmpty)
-            case .unlocked:
-                Button("Test vault") { runTest() }.disabled(busy)
-                Button("Push all secrets to vault") { pushAll() }.disabled(busy)
-                Button("Lock vault") { lock() }
-            }
+        let configured = bitwardenDraftConfigured
+        if let status = model.bitwardenStatus, status.state == .unlocked {
+            Button("Test vault") { runTest() }.disabled(busy)
+            Button("Lock vault") { lock() }
+        } else if configured {
+            SecureField("Master password", text: $master)
+            Button("Unlock") { unlock() }.disabled(busy || master.isEmpty)
+        } else {
+            Text(draft.bitwarden.authMode == .password
+                 ? "Enter your server URL and account email."
+                 : "Enter your account email and personal API key.")
+            .font(.footnote).foregroundStyle(.secondary)
         }
     }
 
+    private var bitwardenDraftConfigured: Bool {
+        switch draft.bitwarden.authMode {
+        case .password:
+            return !draft.bitwarden.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .apiKey:
+            return !draft.bitwarden.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !draft.bitwarden.clientId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !draft.bitwarden.clientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func loadStoredMasterPassword() {
+        guard draft.bitwarden.authMode == .password,
+              master.isEmpty,
+              let stored = BitwardenPasswordStore.load(for: draft.bitwarden) else { return }
+        master = stored
+    }
+
     private func unlock() {
-        busy = true; message = nil
+        model.updateSettings(draft)
+        busy = true; message = "Unlocking vault…"
         Task {
             do {
                 try await model.unlockVault(master)
@@ -185,19 +218,6 @@ private struct BitwardenSettingsPage: View {
 
     private func lock() {
         Task { await model.lockVault() }
-    }
-
-    private func pushAll() {
-        busy = true; message = nil
-        Task {
-            do {
-                try await model.pushAllSecretsToVault()
-                message = "All secrets pushed to the vault."
-            } catch {
-                message = error.localizedDescription
-            }
-            busy = false
-        }
     }
 
     private func runTest() {
