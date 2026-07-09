@@ -104,7 +104,14 @@ function BitwardenSection() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bw.serverUrl, bw.email, bw.clientId, bw.clientSecret, bw.itemPrefix]);
+  }, [
+    bw.serverUrl,
+    bw.email,
+    bw.authMode,
+    bw.clientId,
+    bw.clientSecret,
+    bw.itemPrefix,
+  ]);
 
   const toggle = async (next: boolean) => {
     setMsg(null);
@@ -189,10 +196,9 @@ function BitwardenSection() {
           <p className="text-sm text-muted-foreground">
             Usernames, passwords and SSH keys are kept in your Bitwarden vault,
             reached directly over the Bitwarden API (no <code>bw</code> CLI) and
-            synced end-to-end. Authenticate with a personal API key; the master
-            password unlocks the vault locally and is never stored. When off,
-            secrets stay on this device only and are never written to the sync
-            file.
+            synced end-to-end. Sign in with your account password, or use a
+            personal API key for accounts that require interactive 2FA. The
+            master password is never stored.
           </p>
         </div>
         <Switch checked={bw.enabled} onCheckedChange={toggle} />
@@ -202,6 +208,25 @@ function BitwardenSection() {
         <>
           <Separator />
           <div className="grid gap-3">
+            <div className="grid gap-2">
+              <Label>Sign-in method</Label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant={(bw.authMode ?? 'password') === 'password' ? 'default' : 'outline'}
+                  onClick={() => setBitwarden({ authMode: 'password' })}
+                >
+                  Account password
+                </Button>
+                <Button
+                  type="button"
+                  variant={bw.authMode === 'apiKey' ? 'default' : 'outline'}
+                  onClick={() => setBitwarden({ authMode: 'apiKey' })}
+                >
+                  Personal API key
+                </Button>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="bw-server">Server URL (self-hosted)</Label>
@@ -223,26 +248,30 @@ function BitwardenSection() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="bw-client-id">API key client_id</Label>
-                <Input
-                  id="bw-client-id"
-                  placeholder="user.xxxxxxxx-…"
-                  value={bw.clientId}
-                  onChange={(e) => setBitwarden({ clientId: e.target.value })}
-                />
+            {(bw.authMode ?? 'password') === 'apiKey' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="bw-client-id">API key client_id</Label>
+                  <Input
+                    id="bw-client-id"
+                    placeholder="user.xxxxxxxx-…"
+                    value={bw.clientId}
+                    onChange={(e) => setBitwarden({ clientId: e.target.value })}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="bw-client-secret">API key client_secret</Label>
+                  <Input
+                    id="bw-client-secret"
+                    type="password"
+                    value={bw.clientSecret}
+                    onChange={(e) =>
+                      setBitwarden({ clientSecret: e.target.value })
+                    }
+                  />
+                </div>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="bw-client-secret">API key client_secret</Label>
-                <Input
-                  id="bw-client-secret"
-                  type="password"
-                  value={bw.clientSecret}
-                  onChange={(e) => setBitwarden({ clientSecret: e.target.value })}
-                />
-              </div>
-            </div>
+            )}
             <div className="grid gap-2">
               <Label htmlFor="bw-prefix">Item name prefix</Label>
               <Input
@@ -263,8 +292,8 @@ function BitwardenSection() {
 
             {status?.available === false && (
               <p className="text-sm text-muted-foreground">
-                Enter your account email and a personal API key (Bitwarden web
-                vault → Account Settings → Security → Keys → View API Key).
+                Enter your account email. If you choose personal API key mode,
+                also fill in the key from the Bitwarden web vault.
               </p>
             )}
             {status?.available && status.state === 'locked' && (

@@ -174,6 +174,12 @@ export interface BitwardenSettings {
    */
   enabled: boolean;
   /**
+   * `password` signs in like the web vault with account email + master
+   * password at unlock time. `apiKey` uses a personal API key plus the master
+   * password, which is better for accounts that require interactive 2FA.
+   */
+  authMode: 'password' | 'apiKey';
+  /**
    * Base URL of the Bitwarden server. Empty means the official cloud
    * (identity.bitwarden.com / api.bitwarden.com). For self-hosted/Vaultwarden
    * set the base URL; `/identity` and `/api` are appended.

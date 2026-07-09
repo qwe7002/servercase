@@ -15,6 +15,7 @@ function uid(): string {
 const DEFAULTS: GlobalSettings = {
   bitwarden: {
     enabled: false,
+    authMode: 'password',
     serverUrl: '',
     email: '',
     clientId: '',

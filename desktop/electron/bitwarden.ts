@@ -27,6 +27,7 @@ import type {
 export class BitwardenVault {
   private settings: BitwardenSettings = {
     enabled: false,
+    authMode: 'password',
     serverUrl: '',
     email: '',
     clientId: '',
@@ -45,11 +46,12 @@ export class BitwardenVault {
     if (
       settings.serverUrl !== this.settings.serverUrl ||
       settings.email !== this.settings.email ||
+      settings.authMode !== this.settings.authMode ||
       settings.clientId !== this.settings.clientId
     ) {
       this.lock();
     }
-    this.settings = settings;
+    this.settings = { ...settings, authMode: settings.authMode ?? 'password' };
   }
 
   private get identityUrl(): string {
@@ -63,9 +65,18 @@ export class BitwardenVault {
   }
 
   private get configured(): boolean {
-    return Boolean(
-      this.settings.email && this.settings.clientId && this.settings.clientSecret,
-    );
+    if (this.authMode === 'apiKey') {
+      return Boolean(
+        this.settings.email &&
+          this.settings.clientId &&
+          this.settings.clientSecret,
+      );
+    }
+    return Boolean(this.settings.email);
+  }
+
+  private get authMode(): BitwardenSettings['authMode'] {
+    return this.settings.authMode ?? 'password';
   }
 
   private get unlocked(): boolean {
@@ -89,9 +100,9 @@ export class BitwardenVault {
   }
 
   async unlock(masterPassword: string): Promise<BitwardenStatus> {
-    if (!this.configured) throw new Error('Bitwarden API key not configured');
+    if (!this.configured) throw new Error('Bitwarden account not configured');
 
-    const token = await this.requestToken();
+    const token = await this.requestToken(masterPassword);
     // KDF params come with the token; prelogin is only a fallback.
     const kdf = token.kdf ?? (await this.prelogin());
 
@@ -287,16 +298,19 @@ export class BitwardenVault {
     return { type: 0, iterations: 600000, memory: 64, parallelism: 4 };
   }
 
-  private async requestToken(): Promise<TokenResult> {
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.settings.clientId,
-      client_secret: this.settings.clientSecret,
-      scope: 'api',
-      deviceType: '8', // LinuxDesktop
-      deviceIdentifier: this.deviceId,
-      deviceName: 'ServerCase',
-    });
+  private async requestToken(masterPassword: string): Promise<TokenResult> {
+    const body =
+      this.authMode === 'apiKey'
+        ? new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: this.settings.clientId,
+            client_secret: this.settings.clientSecret,
+            scope: 'api',
+            deviceType: '8', // LinuxDesktop
+            deviceIdentifier: this.deviceId,
+            deviceName: 'ServerCase',
+          })
+        : await this.passwordGrantBody(masterPassword);
     const res = await fetch(`${this.identityUrl}/connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -320,6 +334,22 @@ export class BitwardenVault {
       key,
       kdf: pick(json, 'Kdf', 'kdf') !== undefined ? parseKdf(json) : null,
     };
+  }
+
+  private async passwordGrantBody(masterPassword: string): Promise<URLSearchParams> {
+    if (!masterPassword) throw new Error('Master password is required');
+    const kdf = await this.prelogin();
+    const masterKey = this.deriveMasterKey(masterPassword, kdf);
+    return new URLSearchParams({
+      grant_type: 'password',
+      username: this.settings.email,
+      password: masterPasswordHash(masterPassword, masterKey),
+      scope: 'api offline_access',
+      client_id: 'web',
+      deviceType: '8', // LinuxDesktop
+      deviceIdentifier: this.deviceId,
+      deviceName: 'ServerCase',
+    });
   }
 
   private async fetchCiphers(): Promise<Cipher[]> {
@@ -422,6 +452,18 @@ function normalizeCipher(raw: RawCipher): Cipher {
 function pick(obj: Record<string, unknown>, ...keys: string[]): unknown {
   for (const k of keys) if (obj[k] !== undefined) return obj[k];
   return undefined;
+}
+
+function masterPasswordHash(masterPassword: string, masterKey: Buffer): string {
+  return crypto
+    .pbkdf2Sync(
+      masterKey,
+      Buffer.from(masterPassword, 'utf8'),
+      1,
+      32,
+      'sha256',
+    )
+    .toString('base64');
 }
 
 /** HKDF-Expand (RFC 5869) with the given PRK; SHA-256, info as UTF-8. */
