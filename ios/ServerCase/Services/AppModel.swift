@@ -135,7 +135,7 @@ final class AppModel: ObservableObject {
 
         var cfg = server
         if vaultEnabled, server.password == nil, server.privateKey == nil,
-           let secrets = try? await vault.getSecrets(server.id) {
+           let secrets = try? await vault.getSecrets(server.vaultItemName, aliases: [server.id]) {
             cfg = server.merging(secrets)
         }
 

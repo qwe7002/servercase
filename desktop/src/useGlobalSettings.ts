@@ -22,13 +22,17 @@ export function useGlobalSettings(): void {
     void window.servercase?.bw.configure(bitwarden);
   }, [bitwarden]);
 
-  // When the vault is enabled and already unlocked, pull secrets into memory.
+  // When the vault is enabled, auto-unlock with the OS-keychain-stored master
+  // password if possible (as on iOS), then pull secrets into memory.
   useEffect(() => {
     const api = window.servercase;
     if (!api || !bitwarden.enabled) return;
     let cancelled = false;
     void (async () => {
-      const status = await api.bw.status();
+      let status = await api.bw.status();
+      if (status.state === 'locked') {
+        status = await api.bw.unlockStored().catch(() => status);
+      }
       if (!cancelled && status.state === 'unlocked') {
         await loadSecretsFromVault().catch(() => undefined);
       }

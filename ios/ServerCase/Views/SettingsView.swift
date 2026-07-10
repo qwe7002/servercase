@@ -89,6 +89,7 @@ private struct BitwardenSettingsPage: View {
     @State private var busy = false
     @State private var folders: [BitwardenFolderOption] = []
     @State private var newFolderName = ""
+    @State private var confirmingFolderDelete = false
 
     var body: some View {
         Form {
@@ -172,11 +173,25 @@ private struct BitwardenSettingsPage: View {
         let configured = bitwardenDraftConfigured
         if let status = model.bitwardenStatus, status.state == .unlocked {
             folderControls
-            Button("Test vault") { runTest() }.disabled(busy)
+            HStack {
+                Button("Test vault") { runTest() }.disabled(busy)
+                if busy {
+                    Spacer()
+                    ProgressView()
+                }
+            }
             Button("Lock vault") { lock() }
         } else if configured {
             SecureField("Master password", text: $master)
-            Button("Unlock") { unlock() }.disabled(busy || master.isEmpty)
+                .submitLabel(.go)
+                .onSubmit { if !busy && !master.isEmpty { unlock() } }
+            HStack {
+                Button("Unlock") { unlock() }.disabled(busy || master.isEmpty)
+                if busy {
+                    Spacer()
+                    ProgressView()
+                }
+            }
         } else {
             Text(draft.bitwarden.authMode == .password
                  ? "Enter your server URL and account email."
@@ -203,8 +218,15 @@ private struct BitwardenSettingsPage: View {
                 .disabled(busy || newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
 
-        Button("Delete current folder", role: .destructive) { deleteCurrentFolder() }
+        Button("Delete current folder", role: .destructive) { confirmingFolderDelete = true }
             .disabled(busy || currentFolderId == nil)
+            .confirmationDialog(
+                "Delete the folder \"\(draft.bitwarden.itemPrefix)\"? Items inside it are kept but become unfiled.",
+                isPresented: $confirmingFolderDelete,
+                titleVisibility: .visible
+            ) {
+                Button("Delete folder", role: .destructive) { deleteCurrentFolder() }
+            }
 
         Button("Refresh folders") { Task { await loadFolders() } }
             .disabled(busy)

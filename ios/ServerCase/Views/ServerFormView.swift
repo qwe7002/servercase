@@ -17,7 +17,6 @@ struct ServerFormView: View {
     @State private var password = ""
     @State private var privateKey = ""
     @State private var passphrase = ""
-    @State private var sshKeyItemName = ""
 
     private var canSave: Bool {
         let hasServerBasics = !name.trimmingCharacters(in: .whitespaces).isEmpty &&
@@ -162,6 +161,16 @@ private struct BitwardenItemPickerPage: View {
     @State private var loading = false
     @State private var error: String?
     @State private var showingAddItem = false
+    @State private var search = ""
+
+    private var filteredItems: [BitwardenSelectableItem] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return items }
+        return items.filter {
+            $0.name.localizedCaseInsensitiveContains(query) ||
+            $0.username.localizedCaseInsensitiveContains(query)
+        }
+    }
 
     var body: some View {
         Form {
@@ -179,8 +188,10 @@ private struct BitwardenItemPickerPage: View {
                     Text(error).foregroundStyle(.secondary)
                 } else if items.isEmpty {
                     Text("No selectable items found.").foregroundStyle(.secondary)
+                } else if filteredItems.isEmpty {
+                    Text("No items match \"\(search)\".").foregroundStyle(.secondary)
                 } else {
-                    ForEach(items) { item in
+                    ForEach(filteredItems) { item in
                         BitwardenItemChoiceRow(item: item) { mode in
                             apply(item, mode: mode)
                         }
@@ -190,6 +201,7 @@ private struct BitwardenItemPickerPage: View {
                 Text("Stored items")
             }
         }
+        .searchable(text: $search, prompt: "Search items")
         .navigationTitle("Bitwarden Item")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -216,7 +228,11 @@ private struct BitwardenItemPickerPage: View {
             items = try await model.bitwardenSelectableItems()
         } catch {
             items = []
-            self.error = "Unlock Bitwarden first, then refresh."
+            if model.bitwardenStatus?.state != .unlocked {
+                self.error = "Unlock Bitwarden in Settings first, then refresh."
+            } else {
+                self.error = "Loading items failed: \(error.localizedDescription)"
+            }
         }
         loading = false
     }
@@ -293,15 +309,20 @@ private struct AddBitwardenItemPage: View {
             }
 
             if let error {
-                Section { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                Section { Text(error).font(.footnote).foregroundStyle(.red) }
             }
         }
+        .disabled(saving)
         .navigationTitle("Add Bitwarden Item")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save() }
-                    .disabled(!canSave || saving)
+                if saving {
+                    ProgressView()
+                } else {
+                    Button("Save") { save() }
+                        .disabled(!canSave)
+                }
             }
         }
     }

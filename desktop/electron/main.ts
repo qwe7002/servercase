@@ -3,6 +3,7 @@ import path from 'node:path';
 import { SshManager } from './ssh/sshManager.js';
 import { SerialManager } from './serial/serialManager.js';
 import { BitwardenVault } from './bitwarden.js';
+import { SafeMasterPasswordStore } from './masterPasswordStore.js';
 import { Bridge } from './bridge.js';
 import {
   IpcChannels,
@@ -28,7 +29,7 @@ const ssh = new SshManager(
   (serverId, shellId) => send(IpcChannels.shellClosed, serverId, shellId),
 );
 
-const bitwarden = new BitwardenVault();
+const bitwarden = new BitwardenVault(new SafeMasterPasswordStore());
 
 const serial = new SerialManager(
   (sessionId, data) => send(IpcChannels.serialData, sessionId, data),
@@ -135,6 +136,7 @@ function registerIpc(): void {
   ipcMain.handle(IpcChannels.bwUnlock, (_e, masterPassword: string) =>
     bitwarden.unlock(masterPassword),
   );
+  ipcMain.handle(IpcChannels.bwUnlockStored, () => bitwarden.unlockWithStored());
   ipcMain.handle(IpcChannels.bwLock, () => bitwarden.lock());
   ipcMain.handle(IpcChannels.bwSync, () => bitwarden.sync());
   ipcMain.handle(IpcChannels.bwTest, () => bitwarden.test());
@@ -151,15 +153,26 @@ function registerIpc(): void {
   );
   ipcMain.handle(
     IpcChannels.bwSet,
-    (_e, serverId: string, secrets: ServerSecrets) =>
-      bitwarden.setSecrets(serverId, secrets),
+    (_e, itemName: string, secrets: ServerSecrets, aliases?: string[]) =>
+      bitwarden.setSecrets(itemName, secrets, aliases ?? []),
   );
-  ipcMain.handle(IpcChannels.bwGet, (_e, serverId: string) =>
-    bitwarden.getSecrets(serverId),
+  ipcMain.handle(
+    IpcChannels.bwGet,
+    (_e, itemName: string, aliases?: string[]) =>
+      bitwarden.getSecrets(itemName, aliases ?? []),
   );
   ipcMain.handle(IpcChannels.bwList, () => bitwarden.listSecrets());
-  ipcMain.handle(IpcChannels.bwDelete, (_e, serverId: string) =>
-    bitwarden.deleteSecrets(serverId),
+  ipcMain.handle(
+    IpcChannels.bwDelete,
+    (_e, itemName: string, aliases?: string[]) =>
+      bitwarden.deleteSecrets(itemName, aliases ?? []),
+  );
+  ipcMain.handle(IpcChannels.bwListFolders, () => bitwarden.listFolders());
+  ipcMain.handle(IpcChannels.bwCreateFolder, (_e, name: string) =>
+    bitwarden.createFolder(name),
+  );
+  ipcMain.handle(IpcChannels.bwDeleteFolder, (_e, folderId: string) =>
+    bitwarden.deleteFolder(folderId),
   );
 
   // ── SFTP ──────────────────────────────────────────────────────────────────

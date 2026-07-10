@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react';
-import type { BitwardenStatus, BridgeInfo, Snippet } from '../../electron/shared';
+import { useEffect, useRef, useState } from 'react';
+import type {
+  BitwardenFolder,
+  BitwardenStatus,
+  BridgeInfo,
+  Snippet,
+} from '../../electron/shared';
 import { useSettings } from '../store/settings';
 import { useServers } from '../store/servers';
 import { Button } from '@/components/ui/button';
@@ -92,13 +97,33 @@ function BitwardenSection() {
   const [master, setMaster] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [folders, setFolders] = useState<BitwardenFolder[]>([]);
+  const [newFolder, setNewFolder] = useState('');
+  const autoUnlockTried = useRef(false);
 
   const api = window.servercase;
+
+  const loadFolders = async () => {
+    if (!api) return;
+    try {
+      setFolders(await api.bw.listFolders());
+    } catch (e) {
+      setMsg(`Folder refresh failed: ${(e as Error).message}`);
+    }
+  };
 
   const refresh = async () => {
     if (!api) return;
     await api.bw.configure(bw);
-    setStatus(await api.bw.status());
+    // Try the OS-keychain-stored master password before asking (as on iOS),
+    // once per settings visit so a stale password can't spam login attempts.
+    let next = await api.bw.status();
+    if (next.state === 'locked' && !autoUnlockTried.current) {
+      autoUnlockTried.current = true;
+      next = await api.bw.unlockStored().catch(() => next);
+    }
+    setStatus(next);
+    if (next.state === 'unlocked') await loadFolders();
   };
 
   useEffect(() => {
@@ -142,6 +167,7 @@ function BitwardenSection() {
       setMaster('');
       if (next.state === 'unlocked') {
         await loadSecretsFromVault();
+        await loadFolders();
         setMsg('Vault unlocked and secrets loaded.');
       }
     } catch (e) {
@@ -179,6 +205,53 @@ function BitwardenSection() {
       setMsg(await api.bw.test());
     } catch (e) {
       setMsg(`Vault test failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addFolder = async () => {
+    if (!api) return;
+    const name = newFolder.trim();
+    if (!name) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const folder = await api.bw.createFolder(name);
+      setNewFolder('');
+      setBitwarden({ itemPrefix: folder.name });
+      await loadFolders();
+      setMsg('Folder added.');
+    } catch (e) {
+      setMsg(`Folder add failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const currentFolderId = folders.find(
+    (f) => f.name === bw.itemPrefix.trim(),
+  )?.id;
+
+  const deleteCurrentFolder = async () => {
+    if (!api || !currentFolderId) return;
+    if (
+      !window.confirm(
+        `Delete the Bitwarden folder "${bw.itemPrefix.trim()}"? Items inside it are kept but become unfiled.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.bw.deleteFolder(currentFolderId);
+      const remaining = folders.filter((f) => f.id !== currentFolderId);
+      setBitwarden({ itemPrefix: remaining[0]?.name ?? 'ServerCase' });
+      await loadFolders();
+      setMsg('Folder deleted.');
+    } catch (e) {
+      setMsg(`Folder delete failed: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
@@ -273,13 +346,65 @@ function BitwardenSection() {
               </div>
             )}
             <div className="grid gap-2">
-              <Label htmlFor="bw-prefix">Item name prefix</Label>
-              <Input
-                id="bw-prefix"
-                value={bw.itemPrefix}
-                onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
-              />
+              <Label htmlFor="bw-folder">Vault folder</Label>
+              {unlocked && folders.length > 0 ? (
+                <select
+                  id="bw-folder"
+                  value={bw.itemPrefix}
+                  onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {!folders.some((f) => f.name === bw.itemPrefix) && (
+                    <option value={bw.itemPrefix}>
+                      {bw.itemPrefix.trim() || 'ServerCase'} (will be created)
+                    </option>
+                  )}
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.name}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  id="bw-folder"
+                  placeholder="ServerCase"
+                  value={bw.itemPrefix}
+                  onChange={(e) => setBitwarden({ itemPrefix: e.target.value })}
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                ServerCase login items live inside this Bitwarden folder.
+              </p>
             </div>
+            {unlocked && (
+              <div className="grid gap-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="New folder name"
+                    value={newFolder}
+                    onChange={(e) => setNewFolder(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void addFolder()}
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => void addFolder()}
+                    disabled={busy || !newFolder.trim()}
+                  >
+                    <Plus /> Add
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="text-destructive"
+                    onClick={() => void deleteCurrentFolder()}
+                    disabled={busy || !currentFolderId}
+                    title="Delete the selected folder"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           <Separator />

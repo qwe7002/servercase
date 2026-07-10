@@ -1,10 +1,21 @@
 import crypto from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2';
 import type {
+  BitwardenFolder,
   BitwardenSettings,
   BitwardenStatus,
   ServerSecrets,
 } from './shared.js';
+
+/**
+ * Persists the master password between launches so the vault can auto-unlock,
+ * mirroring the iOS Keychain store. The desktop backs this with Electron's
+ * `safeStorage` (OS keychain); tests can inject an in-memory fake.
+ */
+export interface MasterPasswordStore {
+  load(account: string): string | null;
+  save(account: string, password: string): void;
+}
 
 /**
  * A clean-room Bitwarden client: it speaks the Bitwarden REST API directly and
@@ -14,7 +25,14 @@ import type {
  *
  * Auth uses a personal API key (OAuth `client_credentials`), which avoids the
  * interactive 2FA flow; the master password is still required to derive the
- * vault key locally and is never sent to the server or persisted.
+ * vault key locally and is never sent to the server.
+ *
+ * Vault layout (shared with the iOS/Android clients):
+ *  - items are ordinary login ciphers inside the configured ServerCase folder,
+ *    named by the user (e.g. the server name) — legacy `<folder>/<name>` items
+ *    are still found and migrate into the folder on the next save;
+ *  - SSH private keys live in their own SSH-key cipher (type 5), linked from
+ *    the login item via a hidden `servercase.sshKeyItemName` custom field.
  *
  * Crypto:
  *  - master key  = PBKDF2-SHA256(password, email, iters)         [Kdf 0]
@@ -32,7 +50,7 @@ export class BitwardenVault {
     email: '',
     clientId: '',
     clientSecret: '',
-    itemPrefix: 'ServerCase/',
+    itemPrefix: 'ServerCase',
   };
 
   // In-memory session, populated by unlock(); never persisted.
@@ -41,6 +59,8 @@ export class BitwardenVault {
   private userEncKey: Buffer | null = null;
   private userMacKey: Buffer | null = null;
   private readonly deviceId = crypto.randomUUID();
+
+  constructor(private readonly passwordStore?: MasterPasswordStore) {}
 
   configure(settings: BitwardenSettings): void {
     if (
@@ -54,14 +74,18 @@ export class BitwardenVault {
     this.settings = { ...settings, authMode: settings.authMode ?? 'password' };
   }
 
+  private get base(): string {
+    const trimmed = this.settings.serverUrl.trim().replace(/\/+$/, '');
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  }
+
   private get identityUrl(): string {
-    const base = this.settings.serverUrl.trim().replace(/\/+$/, '');
-    return base ? `${base}/identity` : 'https://identity.bitwarden.com';
+    return this.base ? `${this.base}/identity` : 'https://identity.bitwarden.com';
   }
 
   private get apiUrl(): string {
-    const base = this.settings.serverUrl.trim().replace(/\/+$/, '');
-    return base ? `${base}/api` : 'https://api.bitwarden.com';
+    return this.base ? `${this.base}/api` : 'https://api.bitwarden.com';
   }
 
   private get configured(): boolean {
@@ -83,6 +107,12 @@ export class BitwardenVault {
     return Boolean(
       this.userEncKey && this.accessToken && Date.now() < this.tokenExpiresAt,
     );
+  }
+
+  /** Stable account key for the persisted master password, as on iOS. */
+  private get accountKey(): string {
+    const server = (this.base || 'https://bitwarden.com').toLowerCase();
+    return `${server}|${this.settings.email.trim().toLowerCase()}`;
   }
 
   status(): Promise<BitwardenStatus> {
@@ -117,6 +147,28 @@ export class BitwardenVault {
     this.userMacKey = userKey.subarray(32, 64);
     this.accessToken = token.accessToken;
     this.tokenExpiresAt = Date.now() + token.expiresInSec * 1000 - 30_000;
+    if (this.authMode === 'password') {
+      this.passwordStore?.save(this.accountKey, masterPassword);
+    }
+    return this.status();
+  }
+
+  /**
+   * Attempts to unlock with the persisted master password (password mode
+   * only). Never throws — returns the current status either way.
+   */
+  async unlockWithStored(): Promise<BitwardenStatus> {
+    if (this.unlocked || !this.configured || this.authMode !== 'password') {
+      return this.status();
+    }
+    const stored = this.passwordStore?.load(this.accountKey);
+    if (stored) {
+      try {
+        return await this.unlock(stored);
+      } catch {
+        /* stale password; stay locked */
+      }
+    }
     return this.status();
   }
 
@@ -137,14 +189,14 @@ export class BitwardenVault {
    */
   async test(): Promise<string> {
     this.assertUnlocked();
-    const id = '__selftest__';
+    const itemName = '__selftest__';
     const probe: ServerSecrets = {
       username: 'servercase',
       password: `probe-${crypto.randomBytes(8).toString('hex')}`,
     };
-    await this.setSecrets(id, probe);
+    await this.setSecrets(itemName, probe);
     try {
-      const read = await this.getSecrets(id);
+      const read = await this.getSecrets(itemName);
       if (
         !read ||
         read.username !== probe.username ||
@@ -152,56 +204,84 @@ export class BitwardenVault {
       ) {
         throw new Error('round-trip mismatch — decrypted value did not match');
       }
-      return `Vault OK — wrote, read back and verified "${this.settings.itemPrefix}${id}".`;
+      return `Vault OK — wrote, read back and verified "${this.folderName}/${itemName}".`;
     } finally {
-      await this.deleteSecrets(id).catch(() => undefined);
+      await this.deleteSecrets(itemName).catch(() => undefined);
     }
   }
 
-  async getSecrets(serverId: string): Promise<ServerSecrets | null> {
-    const cipher = await this.findCipher(serverId);
-    return cipher ? this.decodeSecrets(cipher) : null;
+  async getSecrets(
+    itemName: string,
+    aliases: string[] = [],
+  ): Promise<ServerSecrets | null> {
+    const snapshot = await this.fetchSync();
+    const cipher = this.findCipherIn(itemName, aliases, snapshot.ciphers);
+    return cipher ? this.resolveSecrets(cipher, snapshot.ciphers) : null;
   }
 
   async listSecrets(): Promise<Record<string, ServerSecrets>> {
-    const ciphers = await this.fetchCiphers();
+    const snapshot = await this.fetchSync();
+    const folderId = this.serverCaseFolderId(snapshot.folders);
     const out: Record<string, ServerSecrets> = {};
-    for (const cipher of ciphers) {
+    for (const cipher of snapshot.ciphers) {
+      if (cipher.type !== 1) continue;
       const keys = this.cipherKeys(cipher);
       const name = decryptField(cipher.name, keys.enc, keys.mac);
-      if (name && name.startsWith(this.settings.itemPrefix)) {
-        out[name.slice(this.settings.itemPrefix.length)] =
-          this.decodeSecrets(cipher);
+      if (!name) continue;
+      if (folderId && cipher.folderId === folderId) {
+        out[name] = this.resolveSecrets(cipher, snapshot.ciphers);
+      } else if (name.startsWith(this.legacyItemPrefix)) {
+        out[name.slice(this.legacyItemPrefix.length)] = this.resolveSecrets(
+          cipher,
+          snapshot.ciphers,
+        );
       }
     }
     return out;
   }
 
-  async setSecrets(serverId: string, secrets: ServerSecrets): Promise<void> {
+  async setSecrets(
+    itemName: string,
+    secrets: ServerSecrets,
+    aliases: string[] = [],
+  ): Promise<void> {
     this.assertUnlocked();
-    const enc = this.userEncKey!;
-    const mac = this.userMacKey!;
-    const name = encryptEncString(this.settings.itemPrefix + serverId, enc, mac);
-    const notes = encryptEncString(JSON.stringify(secrets), enc, mac);
+    const folderId = await this.ensureServerCaseFolderId();
+
+    // A private key gets its own SSH-key item; the login item keeps only the
+    // link to it (and the passphrase in the password slot).
+    const normalized: ServerSecrets = { ...secrets };
+    if (secrets.privateKey) {
+      const keyItemName = secrets.sshKeyItemName?.trim()
+        ? secrets.sshKeyItemName.trim()
+        : `${this.normalizedItemName(itemName)} SSH Key`;
+      await this.setSSHKeyItem(keyItemName, secrets.privateKey);
+      normalized.sshKeyItemName = keyItemName;
+      normalized.password = secrets.passphrase;
+      normalized.privateKey = undefined;
+      normalized.passphrase = undefined;
+    }
+
     const body = {
       type: 1,
-      name,
-      notes,
+      name: this.encryptField(this.normalizedItemName(itemName)),
+      notes: null,
       favorite: false,
-      folderId: null,
+      folderId,
       organizationId: null,
       login: {
-        username: secrets.username
-          ? encryptEncString(secrets.username, enc, mac)
+        username: normalized.username
+          ? this.encryptField(normalized.username)
           : null,
-        password: secrets.password
-          ? encryptEncString(secrets.password, enc, mac)
+        password: normalized.password
+          ? this.encryptField(normalized.password)
           : null,
         uris: null,
         totp: null,
       },
+      fields: this.encryptedFields(normalized),
     };
-    const existing = await this.findCipher(serverId);
+    const existing = await this.findCipher(itemName, aliases);
     if (existing) {
       await this.api('PUT', `/ciphers/${existing.id}`, body);
     } else {
@@ -209,9 +289,62 @@ export class BitwardenVault {
     }
   }
 
-  async deleteSecrets(serverId: string): Promise<void> {
-    const cipher = await this.findCipher(serverId);
+  async deleteSecrets(itemName: string, aliases: string[] = []): Promise<void> {
+    const cipher = await this.findCipher(itemName, aliases);
     if (cipher) await this.api('DELETE', `/ciphers/${cipher.id}`);
+  }
+
+  // ── folders ───────────────────────────────────────────────────────────────
+
+  async listFolders(): Promise<BitwardenFolder[]> {
+    const snapshot = await this.fetchSync();
+    const enc = this.encKey;
+    const mac = this.macKey;
+    return snapshot.folders
+      .flatMap((folder) => {
+        const name = decryptField(folder.name, enc, mac);
+        return name ? [{ id: folder.id, name }] : [];
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+
+  async createFolder(name: string): Promise<BitwardenFolder> {
+    const cleanName = this.normalizedFolderName(name);
+    const res = (await this.api('POST', '/folders', {
+      name: this.encryptField(cleanName),
+    })) as Record<string, unknown> | undefined;
+    const id = res ? pick(res, 'Id', 'id') : undefined;
+    if (typeof id !== 'string') {
+      throw new Error('Bitwarden folder create response missing id');
+    }
+    return { id, name: cleanName };
+  }
+
+  async deleteFolder(id: string): Promise<void> {
+    await this.api('DELETE', `/folders/${id}`);
+  }
+
+  // ── naming ────────────────────────────────────────────────────────────────
+
+  private get folderName(): string {
+    return this.normalizedFolderName(this.settings.itemPrefix);
+  }
+
+  private get legacyItemPrefix(): string {
+    return `${this.folderName}/`;
+  }
+
+  private normalizedFolderName(name: string): string {
+    const trimmed = name.trim().replace(/^\/+|\/+$/g, '');
+    return trimmed || 'ServerCase';
+  }
+
+  private normalizedItemName(itemName: string): string {
+    const trimmed = itemName.trim().replace(/^\/+|\/+$/g, '');
+    const withoutFolder = trimmed.startsWith(this.legacyItemPrefix)
+      ? trimmed.slice(this.legacyItemPrefix.length)
+      : trimmed;
+    return withoutFolder || 'Server';
   }
 
   // ── crypto ────────────────────────────────────────────────────────────────
@@ -241,6 +374,10 @@ export class BitwardenVault {
     throw new Error(`unsupported KDF type ${kdf.type}`);
   }
 
+  private encryptField(plaintext: string): string {
+    return encryptEncString(plaintext, this.encKey, this.macKey);
+  }
+
   /** The keys to use for a cipher's fields: its own key, or the user key. */
   private cipherKeys(cipher: Cipher): { enc: Buffer; mac: Buffer } {
     if (cipher.key) {
@@ -252,8 +389,27 @@ export class BitwardenVault {
     return { enc: this.encKey, mac: this.macKey };
   }
 
+  /** Decodes a login cipher and joins in its linked SSH-key item, if any. */
+  private resolveSecrets(cipher: Cipher, ciphers: Cipher[]): ServerSecrets {
+    const secrets = this.decodeSecrets(cipher);
+    if (secrets.sshKeyItemName) {
+      const keyCipher = this.findCipherByExactName(
+        secrets.sshKeyItemName,
+        ciphers,
+      );
+      const privateKey = keyCipher ? this.decodeSSHPrivateKey(keyCipher) : null;
+      if (privateKey) {
+        secrets.privateKey = privateKey;
+        secrets.passphrase = secrets.password;
+        secrets.password = undefined;
+      }
+    }
+    return secrets;
+  }
+
   private decodeSecrets(cipher: Cipher): ServerSecrets {
     const keys = this.cipherKeys(cipher);
+    // Legacy items stored the whole secrets object as notes JSON.
     const notes = decryptField(cipher.notes, keys.enc, keys.mac);
     if (notes) {
       try {
@@ -262,10 +418,40 @@ export class BitwardenVault {
         /* fall through */
       }
     }
+
+    let sshKeyItemName: string | undefined;
+    for (const field of cipher.fields) {
+      const name = decryptField(field.name, keys.enc, keys.mac);
+      if (name === 'servercase.sshKeyItemName') {
+        sshKeyItemName =
+          decryptField(field.value, keys.enc, keys.mac) ?? undefined;
+      }
+    }
+
     return {
-      username: decryptField(cipher.login?.username, keys.enc, keys.mac) ?? undefined,
-      password: decryptField(cipher.login?.password, keys.enc, keys.mac) ?? undefined,
+      username:
+        decryptField(cipher.login?.username, keys.enc, keys.mac) ?? undefined,
+      password:
+        decryptField(cipher.login?.password, keys.enc, keys.mac) ?? undefined,
+      sshKeyItemName,
     };
+  }
+
+  private decodeSSHPrivateKey(cipher: Cipher): string | null {
+    const keys = this.cipherKeys(cipher);
+    return decryptField(cipher.sshPrivateKey, keys.enc, keys.mac);
+  }
+
+  private encryptedFields(secrets: ServerSecrets): unknown[] | null {
+    if (!secrets.sshKeyItemName) return null;
+    return [
+      {
+        name: this.encryptField('servercase.sshKeyItemName'),
+        value: this.encryptField(secrets.sshKeyItemName),
+        type: 1, // hidden
+        linkedId: null,
+      },
+    ];
   }
 
   private get encKey(): Buffer {
@@ -317,15 +503,7 @@ export class BitwardenVault {
       body,
     });
     const json = (await res.json()) as Record<string, unknown>;
-    if (!res.ok) {
-      throw new Error(
-        String(
-          json.error_description ||
-            (json.ErrorModel as { Message?: string })?.Message ||
-            'Bitwarden login failed',
-        ),
-      );
-    }
+    if (!res.ok) throw new Error(loginErrorMessage(json));
     const key = pick(json, 'Key', 'key');
     if (typeof key !== 'string') throw new Error('login response missing key');
     return {
@@ -342,7 +520,7 @@ export class BitwardenVault {
     const masterKey = this.deriveMasterKey(masterPassword, kdf);
     return new URLSearchParams({
       grant_type: 'password',
-      username: this.settings.email,
+      username: this.settings.email.trim(),
       password: masterPasswordHash(masterPassword, masterKey),
       scope: 'api offline_access',
       client_id: 'web',
@@ -352,22 +530,102 @@ export class BitwardenVault {
     });
   }
 
-  private async fetchCiphers(): Promise<Cipher[]> {
+  private async fetchSync(): Promise<SyncSnapshot> {
     this.assertUnlocked();
-    const sync = (await this.api('GET', '/sync?excludeDomains=true')) as {
-      Ciphers?: RawCipher[];
-      ciphers?: RawCipher[];
+    const sync = (await this.api('GET', '/sync?excludeDomains=true')) as Record<
+      string,
+      unknown
+    >;
+    const rawCiphers =
+      (pick(sync, 'Ciphers', 'ciphers') as RawObject[] | undefined) ?? [];
+    const rawFolders =
+      (pick(sync, 'Folders', 'folders') as RawObject[] | undefined) ?? [];
+    return {
+      ciphers: rawCiphers.map(normalizeCipher),
+      folders: rawFolders.map(normalizeFolder),
     };
-    const raw = sync.Ciphers ?? sync.ciphers ?? [];
-    return raw.map(normalizeCipher);
   }
 
-  private async findCipher(serverId: string): Promise<Cipher | null> {
-    const target = this.settings.itemPrefix + serverId;
-    const ciphers = await this.fetchCiphers();
+  private serverCaseFolderId(folders: Folder[]): string | null {
+    if (!this.userEncKey || !this.userMacKey) return null;
+    const target = this.folderName;
+    for (const folder of folders) {
+      if (decryptField(folder.name, this.encKey, this.macKey) === target) {
+        return folder.id;
+      }
+    }
+    return null;
+  }
+
+  private async ensureServerCaseFolderId(): Promise<string> {
+    const snapshot = await this.fetchSync();
+    const existing = this.serverCaseFolderId(snapshot.folders);
+    if (existing) return existing;
+    return (await this.createFolder(this.folderName)).id;
+  }
+
+  private async setSSHKeyItem(
+    itemName: string,
+    privateKey: string,
+  ): Promise<void> {
+    const folderId = await this.ensureServerCaseFolderId();
+    const body = {
+      type: 5,
+      name: this.encryptField(this.normalizedItemName(itemName)),
+      notes: null,
+      favorite: false,
+      folderId,
+      organizationId: null,
+      sshKey: {
+        privateKey: this.encryptField(privateKey),
+        publicKey: null,
+        keyFingerprint: null,
+      },
+    };
+    const existing = await this.findCipher(itemName);
+    if (existing) {
+      await this.api('PUT', `/ciphers/${existing.id}`, body);
+    } else {
+      await this.api('POST', '/ciphers', body);
+    }
+  }
+
+  private async findCipher(
+    itemName: string,
+    aliases: string[] = [],
+  ): Promise<Cipher | null> {
+    const snapshot = await this.fetchSync();
+    return this.findCipherIn(itemName, aliases, snapshot.ciphers);
+  }
+
+  private findCipherIn(
+    itemName: string,
+    aliases: string[],
+    ciphers: Cipher[],
+  ): Cipher | null {
+    const primary = this.normalizedItemName(itemName);
+    const normalizedAliases = aliases
+      .map((a) => this.normalizedItemName(a))
+      .filter((a) => a && a !== primary);
+    const exactNames = [primary, ...normalizedAliases];
+    const legacyNames = exactNames.map((n) => this.legacyItemPrefix + n);
+
+    for (const expected of [...exactNames, ...legacyNames]) {
+      const match = this.findCipherByExactName(expected, ciphers);
+      if (match) return match;
+    }
+    return null;
+  }
+
+  private findCipherByExactName(
+    itemName: string,
+    ciphers: Cipher[],
+  ): Cipher | null {
     for (const cipher of ciphers) {
       const keys = this.cipherKeys(cipher);
-      if (decryptField(cipher.name, keys.enc, keys.mac) === target) return cipher;
+      if (decryptField(cipher.name, keys.enc, keys.mac) === itemName) {
+        return cipher;
+      }
     }
     return null;
   }
@@ -413,15 +671,34 @@ interface CipherLogin {
   password?: string | null;
 }
 
+interface CipherField {
+  name: string | null;
+  value: string | null;
+}
+
 interface Cipher {
   id: string;
+  type: number;
   name: string | null;
+  folderId: string | null;
   notes: string | null;
   key: string | null;
   login?: CipherLogin | null;
+  sshPrivateKey: string | null;
+  fields: CipherField[];
 }
 
-type RawCipher = Record<string, unknown>;
+interface Folder {
+  id: string;
+  name: string | null;
+}
+
+interface SyncSnapshot {
+  ciphers: Cipher[];
+  folders: Folder[];
+}
+
+type RawObject = Record<string, unknown>;
 
 function parseKdf(obj: unknown): KdfInfo {
   const o = obj as Record<string, unknown>;
@@ -433,11 +710,38 @@ function parseKdf(obj: unknown): KdfInfo {
   };
 }
 
-function normalizeCipher(raw: RawCipher): Cipher {
-  const login = (pick(raw, 'Login', 'login') as RawCipher | undefined) ?? undefined;
+function loginErrorMessage(json: Record<string, unknown>): string {
+  const errorModel = (pick(json, 'ErrorModel', 'errorModel') ?? {}) as RawObject;
+  const candidates = [
+    json.error_description,
+    pick(errorModel, 'Message', 'message'),
+    json.message,
+    json.error,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c) return c;
+  }
+  return 'Bitwarden login failed';
+}
+
+function normalizeFolder(raw: RawObject): Folder {
   return {
     id: String(pick(raw, 'Id', 'id')),
     name: (pick(raw, 'Name', 'name') as string | null) ?? null,
+  };
+}
+
+function normalizeCipher(raw: RawObject): Cipher {
+  const login = (pick(raw, 'Login', 'login') as RawObject | undefined) ?? undefined;
+  const sshKey =
+    (pick(raw, 'SshKey', 'sshKey', 'SSHKey') as RawObject | undefined) ?? undefined;
+  const rawFields =
+    (pick(raw, 'Fields', 'fields') as RawObject[] | undefined) ?? [];
+  return {
+    id: String(pick(raw, 'Id', 'id')),
+    type: Number(pick(raw, 'Type', 'type') ?? 0),
+    name: (pick(raw, 'Name', 'name') as string | null) ?? null,
+    folderId: (pick(raw, 'FolderId', 'folderId') as string | null) ?? null,
     notes: (pick(raw, 'Notes', 'notes') as string | null) ?? null,
     key: (pick(raw, 'Key', 'key') as string | null) ?? null,
     login: login
@@ -446,11 +750,21 @@ function normalizeCipher(raw: RawCipher): Cipher {
           password: (pick(login, 'Password', 'password') as string | null) ?? null,
         }
       : null,
+    sshPrivateKey: sshKey
+      ? ((pick(sshKey, 'PrivateKey', 'privateKey') as string | null) ?? null)
+      : null,
+    fields: rawFields.map((f) => ({
+      name: (pick(f, 'Name', 'name') as string | null) ?? null,
+      value: (pick(f, 'Value', 'value') as string | null) ?? null,
+    })),
   };
 }
 
 function pick(obj: Record<string, unknown>, ...keys: string[]): unknown {
-  for (const k of keys) if (obj[k] !== undefined) return obj[k];
+  for (const k of keys) {
+    const v = obj[k];
+    if (v !== undefined && v !== null) return v;
+  }
   return undefined;
 }
 

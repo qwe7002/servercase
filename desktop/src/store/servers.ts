@@ -16,12 +16,43 @@ function vaultEnabled(): boolean {
   return useSettings.getState().settings.bitwarden.enabled;
 }
 
+/**
+ * The Bitwarden login item name a server's secrets live under: the explicit
+ * item name if set, else the display name, host or id. The server id is always
+ * passed as an alias so items created by older versions are still found.
+ */
+export function vaultItemName(cfg: ServerConfig): string {
+  const explicit = cfg.bitwardenItemName?.trim();
+  if (explicit) return explicit;
+  const name = cfg.name.trim();
+  if (name) return name;
+  return cfg.host.trim() || cfg.id;
+}
+
 function secretsOf(cfg: ServerConfig): ServerSecrets {
   return {
     username: cfg.username,
     password: cfg.password,
     privateKey: cfg.privateKey,
     passphrase: cfg.passphrase,
+  };
+}
+
+function hasCredentialMaterial(s: ServerSecrets): boolean {
+  return Boolean(s.password || s.privateKey || s.sshKeyItemName);
+}
+
+/** Merges vault secrets into a server config, field by field (as on iOS). */
+export function mergeSecrets(
+  cfg: ServerConfig,
+  s: ServerSecrets,
+): ServerConfig {
+  return {
+    ...cfg,
+    username: s.username ?? cfg.username,
+    password: s.password ?? cfg.password,
+    privateKey: s.privateKey ?? cfg.privateKey,
+    passphrase: s.passphrase ?? cfg.passphrase,
   };
 }
 
@@ -37,7 +68,11 @@ function stripSecrets(cfg: ServerConfig): ServerConfig {
 
 /** Mirrors a server's secrets into the Bitwarden vault (best effort). */
 function pushSecret(cfg: ServerConfig): void {
-  void window.servercase?.bw.set(cfg.id, secretsOf(cfg)).catch(() => undefined);
+  const secrets = secretsOf(cfg);
+  if (!hasCredentialMaterial(secrets)) return;
+  void window.servercase?.bw
+    .set(vaultItemName(cfg), secrets, [cfg.id])
+    .catch(() => undefined);
 }
 
 interface ServersState {
@@ -93,13 +128,13 @@ export const useServers = create<ServersState>()(
         }));
         if (vaultEnabled()) pushSecret(cfg);
       },
+      // Vault items are user-facing and may be shared by several servers, so
+      // removing a server never deletes its Bitwarden item (as on iOS).
       removeServer: (id) => {
         set((s) => ({
           servers: s.servers.filter((x) => x.id !== id),
           selectedId: s.selectedId === id ? null : s.selectedId,
         }));
-        if (vaultEnabled())
-          void window.servercase?.bw.delete(id).catch(() => undefined);
       },
       select: (id) => set({ selectedId: id }),
 
@@ -124,16 +159,20 @@ export const useServers = create<ServersState>()(
         if (!api) return;
         const all = await api.bw.list();
         set((s) => ({
-          servers: s.servers.map((sv) =>
-            all[sv.id] ? { ...sv, ...all[sv.id] } : sv,
-          ),
+          servers: s.servers.map((sv) => {
+            // Prefer the named item; fall back to legacy id-keyed items.
+            const secrets = all[vaultItemName(sv)] ?? all[sv.id];
+            return secrets ? mergeSecrets(sv, secrets) : sv;
+          }),
         }));
       },
       pushAllSecretsToVault: async () => {
         const api = window.servercase;
         if (!api) return;
         for (const sv of get().servers) {
-          await api.bw.set(sv.id, secretsOf(sv));
+          const secrets = secretsOf(sv);
+          if (!hasCredentialMaterial(secrets)) continue;
+          await api.bw.set(vaultItemName(sv), secrets, [sv.id]);
         }
       },
       replaceServers: (servers) => set({ servers }),
