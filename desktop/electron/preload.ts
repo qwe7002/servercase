@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   IpcChannels,
+  type BitwardenFolder,
   type BitwardenSettings,
   type BitwardenStatus,
   type BridgeInfo,
@@ -90,17 +91,30 @@ const api = {
       ipcRenderer.invoke(IpcChannels.bwStatus),
     unlock: (masterPassword: string): Promise<BitwardenStatus> =>
       ipcRenderer.invoke(IpcChannels.bwUnlock, masterPassword),
+    /** Attempts an auto-unlock with the OS-keychain-stored master password. */
+    unlockStored: (): Promise<BitwardenStatus> =>
+      ipcRenderer.invoke(IpcChannels.bwUnlockStored),
     lock: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwLock),
     sync: (): Promise<void> => ipcRenderer.invoke(IpcChannels.bwSync),
     test: (): Promise<string> => ipcRenderer.invoke(IpcChannels.bwTest),
-    set: (serverId: string, secrets: ServerSecrets): Promise<void> =>
-      ipcRenderer.invoke(IpcChannels.bwSet, serverId, secrets),
-    get: (serverId: string): Promise<ServerSecrets | null> =>
-      ipcRenderer.invoke(IpcChannels.bwGet, serverId),
+    set: (
+      itemName: string,
+      secrets: ServerSecrets,
+      aliases?: string[],
+    ): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bwSet, itemName, secrets, aliases),
+    get: (itemName: string, aliases?: string[]): Promise<ServerSecrets | null> =>
+      ipcRenderer.invoke(IpcChannels.bwGet, itemName, aliases),
     list: (): Promise<Record<string, ServerSecrets>> =>
       ipcRenderer.invoke(IpcChannels.bwList),
-    delete: (serverId: string): Promise<void> =>
-      ipcRenderer.invoke(IpcChannels.bwDelete, serverId),
+    delete: (itemName: string, aliases?: string[]): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bwDelete, itemName, aliases),
+    listFolders: (): Promise<BitwardenFolder[]> =>
+      ipcRenderer.invoke(IpcChannels.bwListFolders),
+    createFolder: (name: string): Promise<BitwardenFolder> =>
+      ipcRenderer.invoke(IpcChannels.bwCreateFolder, name),
+    deleteFolder: (folderId: string): Promise<void> =>
+      ipcRenderer.invoke(IpcChannels.bwDeleteFolder, folderId),
   },
 
   // Control bridge (MCP)

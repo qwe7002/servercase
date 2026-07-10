@@ -1,5 +1,5 @@
 import type { ServerConfig } from '../../electron/shared';
-import { useServers } from '../store/servers';
+import { mergeSecrets, useServers, vaultItemName } from '../store/servers';
 import { useSettings } from '../store/settings';
 
 /**
@@ -16,8 +16,8 @@ export async function connectServer(server: ServerConfig): Promise<void> {
     let cfg = server;
     const vaultEnabled = useSettings.getState().settings.bitwarden.enabled;
     if (vaultEnabled && !server.password && !server.privateKey) {
-      const secrets = await api.bw.get(server.id);
-      if (secrets) cfg = { ...server, ...secrets };
+      const secrets = await api.bw.get(vaultItemName(server), [server.id]);
+      if (secrets) cfg = mergeSecrets(server, secrets);
     }
     await api.connect(cfg);
   } catch (e) {

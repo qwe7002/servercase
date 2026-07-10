@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AuthType, ServerConfig } from '../../electron/shared';
+import type { AuthType, ServerConfig, ServerSecrets } from '../../electron/shared';
 import { useServers } from '../store/servers';
 import { useProbes } from '../store/probes';
 import { useSettings } from '../store/settings';
@@ -27,6 +27,7 @@ export function ServerForm({ existing, onDone }: Props) {
   const addServer = useServers((s) => s.addServer);
   const updateServer = useServers((s) => s.updateServer);
   const groups = useSettings((s) => s.settings.groups);
+  const bwEnabled = useSettings((s) => s.settings.bitwarden.enabled);
   const probeHosts = useProbes((s) => s.hosts);
 
   const [name, setName] = useState(existing?.name ?? '');
@@ -35,6 +36,9 @@ export function ServerForm({ existing, onDone }: Props) {
   const [host, setHost] = useState(existing?.host ?? '');
   const [port, setPort] = useState(String(existing?.port ?? 22));
   const [username, setUsername] = useState(existing?.username ?? 'root');
+  const [itemName, setItemName] = useState(
+    existing?.bitwardenItemName ?? existing?.name ?? '',
+  );
   const [authType, setAuthType] = useState<AuthType>(
     existing?.authType ?? 'password',
   );
@@ -44,6 +48,26 @@ export function ServerForm({ existing, onDone }: Props) {
 
   const canSave = name.trim() && host.trim() && username.trim();
 
+  /** Fills the credential fields from a vault item chosen in the browser. */
+  const applyVaultItem = (
+    chosenName: string,
+    secrets: ServerSecrets,
+    mode: AuthType,
+  ) => {
+    setItemName(chosenName);
+    if (secrets.username) setUsername(secrets.username);
+    setAuthType(mode);
+    if (mode === 'password') {
+      setPassword(secrets.password ?? '');
+      setPrivateKey('');
+      setPassphrase('');
+    } else {
+      setPrivateKey(secrets.privateKey ?? '');
+      setPassphrase(secrets.passphrase ?? '');
+      setPassword('');
+    }
+  };
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
@@ -52,6 +76,7 @@ export function ServerForm({ existing, onDone }: Props) {
       host: host.trim(),
       port: Number(port) || 22,
       username: username.trim(),
+      bitwardenItemName: itemName.trim() || undefined,
       groupId: groupId || undefined,
       probeHostId: probeHostId || undefined,
       authType,
@@ -137,6 +162,15 @@ export function ServerForm({ existing, onDone }: Props) {
               />
             </div>
 
+            {bwEnabled && (
+              <VaultItemPicker
+                itemName={itemName}
+                fallbackName={name.trim()}
+                onItemName={setItemName}
+                onApply={applyVaultItem}
+              />
+            )}
+
             <div className="grid gap-2">
               <Label htmlFor="server-probe">Probe data</Label>
               <select
@@ -216,5 +250,146 @@ export function ServerForm({ existing, onDone }: Props) {
         </DialogContent>
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * Names the Bitwarden login item that holds this server's credentials and,
+ * when the vault is unlocked, lets the user pick an existing item to fill the
+ * credential fields (mirrors the iOS item picker).
+ */
+function VaultItemPicker({
+  itemName,
+  fallbackName,
+  onItemName,
+  onApply,
+}: {
+  itemName: string;
+  fallbackName: string;
+  onItemName: (name: string) => void;
+  onApply: (name: string, secrets: ServerSecrets, mode: AuthType) => void;
+}) {
+  const [items, setItems] = useState<Record<string, ServerSecrets> | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
+
+  const browse = async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    setLoading(true);
+    setError(null);
+    try {
+      setItems((await window.servercase?.bw.list()) ?? {});
+    } catch {
+      setItems(null);
+      setError('Unlock the Bitwarden vault in Settings first, then retry.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const names = Object.keys(items ?? {})
+    .filter((n) => n.toLowerCase().includes(filter.trim().toLowerCase()))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+  return (
+    <div className="grid gap-2 rounded-lg border p-3">
+      <div className="grid gap-2">
+        <Label htmlFor="server-vault-item">Bitwarden vault item</Label>
+        <div className="flex gap-2">
+          <Input
+            id="server-vault-item"
+            value={itemName}
+            placeholder={fallbackName || 'Same as server name'}
+            onChange={(e) => onItemName(e.target.value)}
+          />
+          <Button type="button" variant="outline" onClick={() => void browse()}>
+            {open ? 'Hide vault' : 'Browse vault'}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Login item inside the configured ServerCase folder that stores this
+          server's credentials. Several servers can share one item.
+        </p>
+      </div>
+
+      {open && (
+        <div className="grid gap-2">
+          {loading && (
+            <p className="text-sm text-muted-foreground">Loading items…</p>
+          )}
+          {error && <p className="text-sm text-muted-foreground">{error}</p>}
+          {items && !loading && (
+            <>
+              {Object.keys(items).length > 3 && (
+                <Input
+                  placeholder="Filter items"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              )}
+              {names.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No stored items found.
+                </p>
+              )}
+              <div className="max-h-48 overflow-y-auto">
+                {names.map((n) => {
+                  const secrets = items[n];
+                  return (
+                    <div
+                      key={n}
+                      className="flex items-center justify-between gap-2 border-b py-2 last:border-b-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm">{n}</p>
+                        {secrets.username && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {secrets.username}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        {secrets.password && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              onApply(n, secrets, 'password');
+                              setOpen(false);
+                            }}
+                          >
+                            Use password
+                          </Button>
+                        )}
+                        {secrets.privateKey && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              onApply(n, secrets, 'key');
+                              setOpen(false);
+                            }}
+                          >
+                            Use SSH key
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

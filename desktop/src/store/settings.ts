@@ -20,7 +20,7 @@ const DEFAULTS: GlobalSettings = {
     email: '',
     clientId: '',
     clientSecret: '',
-    itemPrefix: 'ServerCase/',
+    itemPrefix: 'ServerCase',
   },
   snippets: [],
   bridge: {

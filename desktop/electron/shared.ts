@@ -11,6 +11,12 @@ export interface ServerConfig {
   port: number;
   username: string;
   authType: AuthType;
+  /**
+   * User-facing Bitwarden/Vaultwarden login item name. The item lives inside
+   * the configured ServerCase folder and can be shared by multiple servers.
+   * Falls back to the server name/host when empty.
+   */
+  bitwardenItemName?: string;
   /** Id of the {@link Group} this server belongs to, if any. */
   groupId?: string;
   /** Cloud probe host id to use for overview status instead of SSH polling. */
@@ -191,8 +197,17 @@ export interface BitwardenSettings {
   clientId: string;
   /** Personal API key client_secret. Sensitive; redacted from the sync file. */
   clientSecret: string;
-  /** Name prefix for vault items owned by ServerCase. */
+  /**
+   * Folder name for vault items owned by ServerCase. Items live inside this
+   * Bitwarden folder; legacy `<folder>/<name>`-prefixed items are still found.
+   */
   itemPrefix: string;
+}
+
+/** A Bitwarden vault folder, decrypted for display. */
+export interface BitwardenFolder {
+  id: string;
+  name: string;
 }
 
 /**
@@ -279,13 +294,18 @@ export interface ServerSecrets {
   password?: string;
   privateKey?: string;
   passphrase?: string;
+  /**
+   * Name of the separate Bitwarden SSH-key item (cipher type 5) holding the
+   * private key. Set when the key material lives in its own vault item.
+   */
+  sshKeyItemName?: string;
 }
 
 export type BitwardenLockState = 'unauthenticated' | 'locked' | 'unlocked';
 
-/** Runtime status of the Bitwarden CLI integration. */
+/** Runtime status of the Bitwarden vault integration. */
 export interface BitwardenStatus {
-  /** Whether the `bw` CLI was found and is runnable. */
+  /** Whether the account is configured well enough to attempt an unlock. */
   available: boolean;
   state: BitwardenLockState;
   serverUrl?: string;
@@ -341,10 +361,11 @@ export const IpcChannels = {
   portForwardOpen: 'sc:portForward:open',
   portForwardClose: 'sc:portForward:close',
   portForwardList: 'sc:portForward:list',
-  // bitwarden secret vault (via `bw` CLI)
+  // bitwarden secret vault (direct REST API)
   bwStatus: 'sc:bw:status',
   bwConfigure: 'sc:bw:configure',
   bwUnlock: 'sc:bw:unlock',
+  bwUnlockStored: 'sc:bw:unlockStored',
   bwLock: 'sc:bw:lock',
   bwSync: 'sc:bw:sync',
   bwTest: 'sc:bw:test',
@@ -352,6 +373,9 @@ export const IpcChannels = {
   bwGet: 'sc:bw:get',
   bwList: 'sc:bw:list',
   bwDelete: 'sc:bw:delete',
+  bwListFolders: 'sc:bw:listFolders',
+  bwCreateFolder: 'sc:bw:createFolder',
+  bwDeleteFolder: 'sc:bw:deleteFolder',
   // control bridge (for the MCP server)
   bridgeInfo: 'sc:bridge:info',
   bridgeSetEnabled: 'sc:bridge:setEnabled',
