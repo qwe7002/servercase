@@ -267,6 +267,21 @@ final class AppModel: ObservableObject {
         try await vault.setSecrets(name, secrets)
     }
 
+    func bitwardenFolders() async throws -> [BitwardenFolderOption] {
+        await vault.configure(settings.bitwarden)
+        return try await vault.listFolders()
+    }
+
+    func createBitwardenFolder(named name: String) async throws -> BitwardenFolderOption {
+        await vault.configure(settings.bitwarden)
+        return try await vault.createFolder(named: name)
+    }
+
+    func deleteBitwardenFolder(id: String) async throws {
+        await vault.configure(settings.bitwarden)
+        try await vault.deleteFolder(id: id)
+    }
+
     func testVault() async throws -> String {
         try await vault.test()
     }
@@ -292,10 +307,7 @@ final class AppModel: ObservableObject {
         let payload = SyncService.makePayload(servers: servers, settings: settings)
         let sync = try await cloud.putSync(url: url, token: result.token,
                                            payload: payload, baseVersion: nil, merge: true)
-        applyingRemote = true
-        servers = sync.payload.servers
-        updateSettings(sync.payload.settings)
-        applyingRemote = false
+        await applyCloudPayload(sync.payload)
         updateCloudSyncState(session, version: sync.version, at: sync.updatedAt)
         var next = settings
         next.cloud.email = result.user.email
@@ -341,10 +353,7 @@ final class AppModel: ObservableObject {
             throw CloudError(status: 401, message: "Sign in to ServerCase Cloud first")
         }
         let result = try await cloud.getSync(url: settings.cloud.url, token: session.token)
-        applyingRemote = true
-        servers = result.payload.servers
-        updateSettings(result.payload.settings)
-        applyingRemote = false
+        await applyCloudPayload(result.payload)
         updateCloudSyncState(session, version: result.version, at: result.updatedAt)
         startProbeStream()
     }
@@ -354,6 +363,29 @@ final class AppModel: ObservableObject {
         probeHosts = []
         stopProbeStream()
         CloudSessionStore.save(nil)
+    }
+
+    private func applyCloudPayload(_ payload: SyncPayload) async {
+        applyingRemote = true
+        servers = payload.servers
+        updateSettings(settingsPreservingLocalBitwardenSecrets(from: payload.settings))
+        applyingRemote = false
+
+        if settings.bitwarden.enabled {
+            await unlockVaultWithStoredPasswordIfAvailable()
+            await loadSecretsFromVault()
+        }
+    }
+
+    private func settingsPreservingLocalBitwardenSecrets(from remote: GlobalSettings) -> GlobalSettings {
+        var merged = remote
+        if merged.bitwarden.clientId.isEmpty {
+            merged.bitwarden.clientId = settings.bitwarden.clientId
+        }
+        if merged.bitwarden.clientSecret.isEmpty {
+            merged.bitwarden.clientSecret = settings.bitwarden.clientSecret
+        }
+        return merged
     }
 
     // MARK: Probe hosts

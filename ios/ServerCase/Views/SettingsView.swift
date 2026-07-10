@@ -87,6 +87,8 @@ private struct BitwardenSettingsPage: View {
 
     @State private var master = ""
     @State private var busy = false
+    @State private var folders: [BitwardenFolderOption] = []
+    @State private var newFolderName = ""
 
     var body: some View {
         Form {
@@ -110,8 +112,6 @@ private struct BitwardenSettingsPage: View {
                     TextField("Account email", text: $draft.bitwarden.email)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .keyboardType(.emailAddress)
-                    TextField("Folder name", text: $draft.bitwarden.itemPrefix)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
                 }
 
                 if draft.bitwarden.authMode == .apiKey {
@@ -142,6 +142,7 @@ private struct BitwardenSettingsPage: View {
         .task {
             loadStoredMasterPassword()
             await model.unlockVaultWithStoredPasswordIfAvailable()
+            if model.bitwardenStatus?.state == .unlocked { await loadFolders() }
         }
         .onChange(of: draft.bitwarden) { _, _ in
             loadStoredMasterPassword()
@@ -170,6 +171,7 @@ private struct BitwardenSettingsPage: View {
     @ViewBuilder private var vaultActions: some View {
         let configured = bitwardenDraftConfigured
         if let status = model.bitwardenStatus, status.state == .unlocked {
+            folderControls
             Button("Test vault") { runTest() }.disabled(busy)
             Button("Lock vault") { lock() }
         } else if configured {
@@ -183,6 +185,36 @@ private struct BitwardenSettingsPage: View {
         }
     }
 
+    @ViewBuilder private var folderControls: some View {
+        Picker("Folder", selection: $draft.bitwarden.itemPrefix) {
+            if folders.isEmpty {
+                Text(draft.bitwarden.itemPrefix.isEmpty ? "ServerCase" : draft.bitwarden.itemPrefix)
+                    .tag(draft.bitwarden.itemPrefix)
+            }
+            ForEach(folders) { folder in
+                Text(folder.name).tag(folder.name)
+            }
+        }
+
+        HStack {
+            TextField("New folder", text: $newFolderName)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            Button("Add") { addFolder() }
+                .disabled(busy || newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+
+        Button("Delete current folder", role: .destructive) { deleteCurrentFolder() }
+            .disabled(busy || currentFolderId == nil)
+
+        Button("Refresh folders") { Task { await loadFolders() } }
+            .disabled(busy)
+    }
+
+    private var currentFolderId: String? {
+        let selected = draft.bitwarden.itemPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        return folders.first { $0.name == selected }?.id
+    }
+
     private var bitwardenDraftConfigured: Bool {
         switch draft.bitwarden.authMode {
         case .password:
@@ -191,6 +223,53 @@ private struct BitwardenSettingsPage: View {
             return !draft.bitwarden.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !draft.bitwarden.clientId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !draft.bitwarden.clientSecret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private func loadFolders() async {
+        do {
+            let loaded = try await model.bitwardenFolders()
+            folders = loaded
+            if draft.bitwarden.itemPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let first = loaded.first {
+                draft.bitwarden.itemPrefix = first.name
+            }
+        } catch {
+            message = "Folder refresh failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func addFolder() {
+        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        busy = true; message = nil
+        Task {
+            do {
+                let folder = try await model.createBitwardenFolder(named: name)
+                newFolderName = ""
+                draft.bitwarden.itemPrefix = folder.name
+                await loadFolders()
+                message = "Folder added."
+            } catch {
+                message = "Folder add failed: \(error.localizedDescription)"
+            }
+            busy = false
+        }
+    }
+
+    private func deleteCurrentFolder() {
+        guard let id = currentFolderId else { return }
+        busy = true; message = nil
+        Task {
+            do {
+                try await model.deleteBitwardenFolder(id: id)
+                await loadFolders()
+                draft.bitwarden.itemPrefix = folders.first?.name ?? "ServerCase"
+                message = "Folder deleted."
+            } catch {
+                message = "Folder delete failed: \(error.localizedDescription)"
+            }
+            busy = false
         }
     }
 
@@ -209,6 +288,7 @@ private struct BitwardenSettingsPage: View {
                 try await model.unlockVault(master)
                 master = ""
                 message = "Vault unlocked."
+                await loadFolders()
             } catch {
                 message = error.localizedDescription
             }

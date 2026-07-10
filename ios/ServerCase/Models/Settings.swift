@@ -45,6 +45,11 @@ enum BitwardenAuthMode: String, Codable, CaseIterable, Identifiable {
 /// Bitwarden keychain configuration. We speak the Bitwarden REST API directly
 /// (clean-room crypto, no `bw` CLI), authenticating with either a personal API
 /// key or a client-side master password hash.
+struct BitwardenFolderOption: Identifiable, Equatable {
+    var id: String
+    var name: String
+}
+
 struct BitwardenSettings: Codable, Equatable {
     var enabled: Bool = false
     var authMode: BitwardenAuthMode = .password

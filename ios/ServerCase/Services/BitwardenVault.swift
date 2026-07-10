@@ -220,6 +220,33 @@ actor BitwardenVault {
         }
     }
 
+    func listFolders() async throws -> [BitwardenFolderOption] {
+        let snapshot = try await fetchSync()
+        guard let enc = try? encKey(), let mac = try? macKey() else { return [] }
+        return snapshot.folders.compactMap { folder in
+            guard let name = decryptWith(folder.name, enc, mac), !name.isEmpty else { return nil }
+            return BitwardenFolderOption(id: folder.id, name: name)
+        }
+        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func createFolder(named name: String) async throws -> BitwardenFolderOption {
+        let cleanName = normalizedFolderName(name)
+        let body = try JSONSerialization.data(withJSONObject: [
+            "name": try encryptField(cleanName)
+        ])
+        let data = try await api("POST", "/folders", body: body)
+        let obj = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+        guard let id = pick(obj, "Id", "id") as? String else {
+            throw BitwardenError.request("Bitwarden folder create response missing id")
+        }
+        return BitwardenFolderOption(id: id, name: cleanName)
+    }
+
+    func deleteFolder(id: String) async throws {
+        _ = try await api("DELETE", "/folders/\(id)", body: nil)
+    }
+
     // MARK: Crypto
 
     private func deriveMasterKey(_ password: String, kdf: KdfInfo) async throws -> Data {
@@ -403,8 +430,10 @@ actor BitwardenVault {
         return TokenResult(accessToken: token, expiresInSec: expires, key: key, kdf: kdf)
     }
 
-    private var folderName: String {
-        let trimmed = settings.itemPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var folderName: String { normalizedFolderName(settings.itemPrefix) }
+
+    private func normalizedFolderName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return trimmed.isEmpty ? "ServerCase" : trimmed
     }
